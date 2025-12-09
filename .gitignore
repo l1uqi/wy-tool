@@ -1,0 +1,80 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+
+# Tauri / Rust
+customer-analyzer/src-tauri/target/
+customer-analyzer/src-tauri/gen/
+customer-analyzer/src-tauri/WixTools/
+customer-analyzer/src-tauri/Cargo.lock
+
+# Rust
+*.rs.bk
+**/*.rs.bk
+target/
+
+# IDE
+.vscode/
+.history/
+.idea/
+*.swp
+*.swo
+*.sublime-workspace
+*.sublime-project
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Environment
+.env
+.env.local
+.env.*.local
+*.local
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.cache
+.cache/
+
+# Test coverage
+coverage/
+.nyc_output/
+
+# Package manager locks (optional - uncomment if you don't want to commit)
+# package-lock.json
+# yarn.lock
+# pnpm-lock.yaml
+
+# Generated icons (keep if you want custom icons committed)
+# customer-analyzer/src-tauri/icons/
+
+# Installer output
+*.msi
+*.exe
+*.dmg
+*.AppImage
+*.deb
+*.rpm
+!customer-analyzer/src-tauri/target/release/bundle/
+
+# Debug files
+*.pdb

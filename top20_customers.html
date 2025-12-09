@@ -1,0 +1,831 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>前20大客户分析</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 40px 20px;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        h1 {
+            text-align: center;
+            color: white;
+            margin-bottom: 30px;
+            font-size: 2.5rem;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
+        }
+        
+        .upload-section {
+            background: white;
+            border-radius: 16px;
+            padding: 40px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            margin-bottom: 30px;
+        }
+        
+        .upload-area {
+            border: 3px dashed #667eea;
+            border-radius: 12px;
+            padding: 60px 40px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            background: #f8f9ff;
+        }
+        
+        .upload-area:hover {
+            border-color: #764ba2;
+            background: #f0f2ff;
+        }
+        
+        .upload-area.dragover {
+            border-color: #764ba2;
+            background: #e8ebff;
+        }
+        
+        .upload-icon {
+            font-size: 64px;
+            margin-bottom: 20px;
+        }
+        
+        .upload-text {
+            font-size: 1.2rem;
+            color: #666;
+            margin-bottom: 10px;
+        }
+        
+        .upload-hint {
+            font-size: 0.9rem;
+            color: #999;
+        }
+        
+        #fileInput {
+            display: none;
+        }
+        
+        .file-info {
+            margin-top: 20px;
+            padding: 15px;
+            background: #e8f5e9;
+            border-radius: 8px;
+            color: #2e7d32;
+            display: none;
+        }
+        
+        .result-section {
+            background: white;
+            border-radius: 16px;
+            padding: 30px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            display: none;
+        }
+        
+        .result-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+        
+        .result-title {
+            font-size: 1.5rem;
+            color: #333;
+        }
+        
+        .stats {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+        }
+        
+        .stat-item {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 15px 25px;
+            border-radius: 10px;
+            text-align: center;
+        }
+        
+        .stat-label {
+            font-size: 0.85rem;
+            opacity: 0.9;
+        }
+        
+        .stat-value {
+            font-size: 1.4rem;
+            font-weight: bold;
+            margin-top: 5px;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        
+        th, td {
+            padding: 15px 12px;
+            text-align: left;
+            border-bottom: 1px solid #eee;
+        }
+        
+        th {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            font-weight: 600;
+            position: sticky;
+            top: 0;
+        }
+
+        th:first-child { border-radius: 8px 0 0 0; }
+        th:last-child { border-radius: 0 8px 0 0; }
+        tr:hover { background: #f8f9ff; }
+        
+        .rank {
+            width: 60px;
+            text-align: center;
+        }
+        
+        .rank-badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            font-weight: bold;
+            font-size: 0.9rem;
+        }
+        
+        .rank-1 { background: #ffd700; color: #333; }
+        .rank-2 { background: #c0c0c0; color: #333; }
+        .rank-3 { background: #cd7f32; color: white; }
+        .rank-other { background: #e0e0e0; color: #666; }
+        
+        .amount { font-weight: 600; color: #2e7d32; }
+        
+        .customer-name {
+            max-width: 300px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        
+        .export-btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 1rem;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        
+        .export-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(102, 126, 234, 0.4);
+        }
+
+        .column-info {
+            background: #fff3e0;
+            border-left: 4px solid #ff9800;
+            padding: 15px;
+            margin-top: 20px;
+            border-radius: 0 8px 8px 0;
+        }
+        
+        .column-info h4 { color: #e65100; margin-bottom: 10px; }
+        .column-info ul { margin-left: 20px; color: #666; }
+
+        .table-container {
+            max-height: 600px;
+            overflow-y: auto;
+            border-radius: 8px;
+            border: 1px solid #eee;
+        }
+
+        .percentage { color: #666; font-size: 0.85rem; }
+
+        /* Loading Overlay */
+        #loadingOverlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.7);
+            z-index: 9999;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .loading-content {
+            background: white;
+            padding: 40px 60px;
+            border-radius: 16px;
+            text-align: center;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+            min-width: 400px;
+        }
+
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .loading-step { font-size: 0.85rem; color: #999; margin-bottom: 8px; }
+        .loading-text { font-size: 1.2rem; color: #333; margin-bottom: 10px; font-weight: 500; }
+        .loading-progress { font-size: 0.9rem; color: #666; margin-bottom: 8px; min-height: 20px; }
+        .loading-timer { font-size: 0.85rem; color: #999; margin-bottom: 20px; }
+
+        .cancel-btn {
+            background: #f5f5f5;
+            border: 1px solid #ddd;
+            padding: 8px 24px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            color: #666;
+            transition: all 0.2s;
+        }
+        .cancel-btn:hover { background: #e0e0e0; color: #333; }
+
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: #eee;
+            border-radius: 4px;
+            margin: 15px 0;
+            overflow: hidden;
+        }
+        .progress-bar-fill {
+            height: 100%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 4px;
+            transition: width 0.3s ease;
+            width: 0%;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📊 前20大客户分析</h1>
+        
+        <div class="upload-section">
+            <div class="upload-area" id="uploadArea">
+                <div class="upload-icon">📁</div>
+                <div class="upload-text">点击或拖拽Excel文件到此处</div>
+                <div class="upload-hint">支持 .xlsx, .xls 格式（支持大文件）</div>
+            </div>
+            <input type="file" id="fileInput" accept=".xlsx,.xls">
+            <div class="file-info" id="fileInfo"></div>
+            
+            <div class="column-info">
+                <h4>📌 所需列名说明</h4>
+                <ul>
+                    <li><strong>客户编码</strong> - 用于识别唯一客户</li>
+                    <li><strong>客户名称</strong> - 客户显示名称（可选）</li>
+                    <li><strong>支付金额</strong> - 支付金额数值</li>
+                    <li><strong>充值抵扣</strong> - 充值抵扣金额</li>
+                </ul>
+                <p style="margin-top: 10px; color: #888;">💡 金额计算公式：金额 = 支付金额 + 充值抵扣</p>
+            </div>
+        </div>
+        
+        <div class="result-section" id="resultSection">
+            <div class="result-header">
+                <h2 class="result-title">🏆 前20大客户排行</h2>
+                <div class="stats">
+                    <div class="stat-item">
+                        <div class="stat-label">客户总数</div>
+                        <div class="stat-value" id="totalCustomers">0</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-label">总金额</div>
+                        <div class="stat-value" id="totalAmount">¥0</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-label">Top20占比</div>
+                        <div class="stat-value" id="top20Percentage">0%</div>
+                    </div>
+                </div>
+                <button class="export-btn" onclick="exportResult()">📥 导出结果</button>
+            </div>
+            
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th class="rank">排名</th>
+                            <th>客户编码</th>
+                            <th>客户名称</th>
+                            <th>订单数</th>
+                            <th>支付金额</th>
+                            <th>充值抵扣</th>
+                            <th>总金额</th>
+                            <th>占比</th>
+                        </tr>
+                    </thead>
+                    <tbody id="resultTable"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div id="loadingOverlay">
+        <div class="loading-content">
+            <div class="spinner"></div>
+            <div class="loading-step" id="loadingStep">步骤 1/4</div>
+            <div class="loading-text" id="loadingText">正在处理...</div>
+            <div class="progress-bar"><div class="progress-bar-fill" id="progressBarFill"></div></div>
+            <div class="loading-progress" id="loadingProgress"></div>
+            <div class="loading-timer" id="loadingTimer">已用时: 0秒</div>
+            <button class="cancel-btn" onclick="cancelProcessing()">取消</button>
+        </div>
+    </div>
+
+    <!-- XLSX库 -->
+    <script src="https://cdn.bootcdn.net/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    
+    <script>
+        let processedData = [];
+        let totalAmountAll = 0;
+        let worker = null;
+        let loadingStartTime = null;
+        let loadingTimerInterval = null;
+        let isCancelled = false;
+
+        const uploadArea = document.getElementById('uploadArea');
+        const fileInput = document.getElementById('fileInput');
+        const fileInfo = document.getElementById('fileInfo');
+        const resultSection = document.getElementById('resultSection');
+        const loadingOverlay = document.getElementById('loadingOverlay');
+
+        // ========== Loading 控制 ==========
+        function showLoading(step, text, progress = '', percent = 0) {
+            isCancelled = false;
+            loadingOverlay.style.display = 'flex';
+            document.getElementById('loadingStep').textContent = step;
+            document.getElementById('loadingText').textContent = text;
+            document.getElementById('loadingProgress').textContent = progress;
+            document.getElementById('progressBarFill').style.width = percent + '%';
+            
+            if (!loadingStartTime) {
+                loadingStartTime = Date.now();
+                loadingTimerInterval = setInterval(updateTimer, 1000);
+                updateTimer();
+            }
+            
+            console.log(`[${step}] ${text} ${progress}`);
+        }
+
+        function updateTimer() {
+            if (loadingStartTime) {
+                const elapsed = Math.floor((Date.now() - loadingStartTime) / 1000);
+                const minutes = Math.floor(elapsed / 60);
+                const seconds = elapsed % 60;
+                const timeStr = minutes > 0 ? `${minutes}分${seconds}秒` : `${seconds}秒`;
+                document.getElementById('loadingTimer').textContent = `已用时: ${timeStr}`;
+            }
+        }
+
+        function updateProgress(progress, percent) {
+            document.getElementById('loadingProgress').textContent = progress;
+            document.getElementById('progressBarFill').style.width = percent + '%';
+        }
+
+        function hideLoading() {
+            loadingOverlay.style.display = 'none';
+            loadingStartTime = null;
+            if (loadingTimerInterval) {
+                clearInterval(loadingTimerInterval);
+                loadingTimerInterval = null;
+            }
+        }
+
+        function cancelProcessing() {
+            isCancelled = true;
+            if (worker) {
+                worker.terminate();
+                worker = null;
+            }
+            hideLoading();
+            console.log('用户取消了处理');
+        }
+
+        // ========== 文件上传处理 ==========
+        uploadArea.addEventListener('click', () => fileInput.click());
+        
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) handleFile(e.target.files[0]);
+        });
+
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadArea.classList.add('dragover');
+        });
+
+        uploadArea.addEventListener('dragleave', () => uploadArea.classList.remove('dragover'));
+
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+            if (e.dataTransfer.files.length > 0) handleFile(e.dataTransfer.files[0]);
+        });
+
+        function handleFile(file) {
+            const validExtensions = ['.xlsx', '.xls'];
+            const fileExtension = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
+            
+            if (!validExtensions.includes(fileExtension)) {
+                alert('请上传Excel文件（.xlsx 或 .xls）');
+                return;
+            }
+
+            const fileSizeMB = (file.size / 1024 / 1024).toFixed(2);
+            fileInfo.style.display = 'block';
+            fileInfo.innerHTML = `📄 已选择文件: <strong>${file.name}</strong> (${fileSizeMB}MB)`;
+
+            console.log('========== 开始处理文件 ==========');
+            console.log(`文件名: ${file.name}`);
+            console.log(`文件大小: ${fileSizeMB}MB`);
+
+            showLoading('步骤 1/4', '📖 读取文件...', `文件大小: ${fileSizeMB}MB`, 5);
+
+            const reader = new FileReader();
+            
+            reader.onprogress = (e) => {
+                if (e.lengthComputable) {
+                    const percent = Math.round((e.loaded / e.total) * 100);
+                    const loadedMB = (e.loaded / 1024 / 1024).toFixed(2);
+                    updateProgress(`读取进度: ${loadedMB}MB / ${fileSizeMB}MB`, percent * 0.2);
+                }
+            };
+
+            reader.onload = (e) => {
+                if (isCancelled) return;
+                console.log('✓ 文件读取完成');
+                processWithWorker(e.target.result, fileSizeMB);
+            };
+
+            reader.onerror = () => {
+                hideLoading();
+                alert('文件读取失败');
+            };
+
+            reader.readAsArrayBuffer(file);
+        }
+
+        // ========== Web Worker 处理 ==========
+        function processWithWorker(arrayBuffer, fileSizeMB) {
+            showLoading('步骤 2/4', '📊 解析Excel（后台处理中）...', '大文件需要1-3分钟，请耐心等待...', 25);
+
+            // 创建内联 Web Worker
+            const workerCode = `
+                importScripts('https://cdn.bootcdn.net/ajax/libs/xlsx/0.18.5/xlsx.full.min.js');
+
+                // 心跳计数器
+                let heartbeatCount = 0;
+                let heartbeatInterval = null;
+
+                self.onmessage = function(e) {
+                    const arrayBuffer = e.data;
+                    const sizeMB = (arrayBuffer.byteLength / 1024 / 1024).toFixed(2);
+                    
+                    try {
+                        self.postMessage({ type: 'log', message: '[Worker] 收到数据，大小: ' + sizeMB + 'MB' });
+                        self.postMessage({ type: 'status', step: '2/4', text: '解析Excel工作簿...', percent: 30 });
+                        
+                        // 启动心跳，每3秒报告一次
+                        heartbeatInterval = setInterval(function() {
+                            heartbeatCount++;
+                            self.postMessage({ 
+                                type: 'heartbeat', 
+                                count: heartbeatCount,
+                                message: '[Worker心跳 #' + heartbeatCount + '] 正在解析中... (' + (heartbeatCount * 3) + '秒)'
+                            });
+                        }, 3000);
+                        
+                        self.postMessage({ type: 'log', message: '[Worker] 开始解析Excel，这可能需要几分钟...' });
+                        
+                        const startTime = Date.now();
+                        const data = new Uint8Array(arrayBuffer);
+                        
+                        self.postMessage({ type: 'log', message: '[Worker] ArrayBuffer转换完成，开始XLSX.read()...' });
+                        
+                        const workbook = XLSX.read(data, { type: 'array' });
+                        
+                        // 停止心跳
+                        if (heartbeatInterval) {
+                            clearInterval(heartbeatInterval);
+                            heartbeatInterval = null;
+                        }
+                        
+                        const parseTime = ((Date.now() - startTime) / 1000).toFixed(2);
+                        self.postMessage({ type: 'log', message: '[Worker] ✓ 工作簿解析完成！耗时 ' + parseTime + '秒' });
+                        
+                        self.postMessage({ type: 'status', step: '3/4', text: '转换数据格式...', percent: 50 });
+                        self.postMessage({ type: 'log', message: '[Worker] 工作表: ' + workbook.SheetNames.join(', ') });
+                        
+                        const sheetName = workbook.SheetNames[0];
+                        const worksheet = workbook.Sheets[sheetName];
+                        
+                        self.postMessage({ type: 'log', message: '[Worker] 开始转换为JSON...' });
+                        const jsonStartTime = Date.now();
+                        
+                        const jsonData = XLSX.utils.sheet_to_json(worksheet);
+                        
+                        const jsonTime = ((Date.now() - jsonStartTime) / 1000).toFixed(2);
+                        self.postMessage({ type: 'log', message: '[Worker] ✓ JSON转换完成，耗时 ' + jsonTime + '秒' });
+                        self.postMessage({ type: 'log', message: '[Worker] 数据行数: ' + jsonData.length });
+                        
+                        if (jsonData.length === 0) {
+                            self.postMessage({ type: 'error', message: 'Excel文件为空或格式不正确' });
+                            return;
+                        }
+
+                        // 验证列
+                        const requiredColumns = ['客户编码', '支付金额', '充值抵扣'];
+                        const firstRow = jsonData[0];
+                        const columns = Object.keys(firstRow);
+                        const missingColumns = requiredColumns.filter(col => !(col in firstRow));
+                        
+                        if (missingColumns.length > 0) {
+                            self.postMessage({ 
+                                type: 'error', 
+                                message: '缺少必需的列: ' + missingColumns.join(', ') + '\\n\\n当前Excel的列名:\\n' + columns.join(', ')
+                            });
+                            return;
+                        }
+
+                        self.postMessage({ type: 'status', step: '4/4', text: '分析客户数据...', percent: 60 });
+                        self.postMessage({ type: 'log', message: '[Worker] 开始分组汇总 ' + jsonData.length + ' 行数据...' });
+                        
+                        // 分组汇总
+                        const customerMap = new Map();
+                        const totalRows = jsonData.length;
+                        const processStartTime = Date.now();
+                        
+                        for (let i = 0; i < totalRows; i++) {
+                            const row = jsonData[i];
+                            const customerCode = String(row['客户编码'] || '').trim();
+                            if (!customerCode) continue;
+
+                            const payAmount = parseFloat(row['支付金额']) || 0;
+                            const rechargeDeduction = parseFloat(row['充值抵扣']) || 0;
+                            const totalAmount = payAmount + rechargeDeduction;
+                            const customerName = row['客户名称'] || row['客户'] || '';
+
+                            if (customerMap.has(customerCode)) {
+                                const existing = customerMap.get(customerCode);
+                                existing.payAmount += payAmount;
+                                existing.rechargeDeduction += rechargeDeduction;
+                                existing.totalAmount += totalAmount;
+                                existing.orderCount += 1;
+                                if (!existing.customerName && customerName) {
+                                    existing.customerName = customerName;
+                                }
+                            } else {
+                                customerMap.set(customerCode, {
+                                    customerCode,
+                                    customerName,
+                                    payAmount,
+                                    rechargeDeduction,
+                                    totalAmount,
+                                    orderCount: 1
+                                });
+                            }
+
+                            // 每10000行报告进度
+                            if (i % 10000 === 0) {
+                                const progress = Math.round((i / totalRows) * 100);
+                                const percent = 60 + (progress * 0.35);
+                                self.postMessage({ 
+                                    type: 'progress', 
+                                    text: '处理进度: ' + progress + '% (' + i.toLocaleString() + '/' + totalRows.toLocaleString() + ' 行)',
+                                    percent: percent
+                                });
+                            }
+                        }
+
+                        const processTime = ((Date.now() - processStartTime) / 1000).toFixed(2);
+                        self.postMessage({ type: 'log', message: '[Worker] ✓ 分组汇总完成，耗时 ' + processTime + '秒' });
+                        self.postMessage({ type: 'log', message: '[Worker] 发现 ' + customerMap.size + ' 个不同客户' });
+                        
+                        self.postMessage({ type: 'status', step: '4/4', text: '生成排行榜...', percent: 95 });
+                        self.postMessage({ type: 'log', message: '[Worker] 开始排序...' });
+
+                        // 排序
+                        const customers = Array.from(customerMap.values());
+                        customers.sort((a, b) => b.totalAmount - a.totalAmount);
+
+                        // 计算总金额
+                        const totalAmountAll = customers.reduce((sum, c) => sum + c.totalAmount, 0);
+
+                        // 取前20名
+                        const top20 = customers.slice(0, 20);
+                        const top20Amount = top20.reduce((sum, c) => sum + c.totalAmount, 0);
+
+                        const totalTime = ((Date.now() - startTime) / 1000).toFixed(2);
+                        self.postMessage({ type: 'log', message: '[Worker] ✓ 全部处理完成！总耗时 ' + totalTime + '秒' });
+
+                        self.postMessage({ 
+                            type: 'complete', 
+                            data: {
+                                top20: top20,
+                                totalCustomers: customers.length,
+                                totalAmountAll: totalAmountAll,
+                                top20Amount: top20Amount,
+                                totalTime: totalTime,
+                                totalRows: totalRows
+                            }
+                        });
+
+                    } catch (error) {
+                        // 停止心跳
+                        if (heartbeatInterval) {
+                            clearInterval(heartbeatInterval);
+                            heartbeatInterval = null;
+                        }
+                        self.postMessage({ type: 'log', message: '[Worker] ❌ 发生错误: ' + error.message });
+                        self.postMessage({ type: 'error', message: error.message });
+                    }
+                };
+            `;
+
+            const blob = new Blob([workerCode], { type: 'application/javascript' });
+            const workerUrl = URL.createObjectURL(blob);
+            
+            worker = new Worker(workerUrl);
+
+            worker.onmessage = function(e) {
+                const msg = e.data;
+                
+                switch (msg.type) {
+                    case 'status':
+                        showLoading(`步骤 ${msg.step}`, msg.text, '', msg.percent);
+                        break;
+                    case 'progress':
+                        updateProgress(msg.text, msg.percent);
+                        break;
+                    case 'log':
+                        console.log('📋 ' + msg.message);
+                        break;
+                    case 'heartbeat':
+                        // 心跳消息 - 证明Worker还在运行
+                        console.log('💓 ' + msg.message);
+                        document.getElementById('loadingProgress').textContent = '心跳 #' + msg.count + ' - Worker正在运行中...';
+                        break;
+                    case 'error':
+                        hideLoading();
+                        alert(msg.message);
+                        break;
+                    case 'complete':
+                        handleComplete(msg.data);
+                        break;
+                }
+            };
+
+            worker.onerror = function(error) {
+                hideLoading();
+                console.error('Worker错误:', error);
+                alert('处理出错: ' + error.message);
+            };
+
+            // 发送数据给Worker
+            worker.postMessage(arrayBuffer, [arrayBuffer]);
+        }
+
+        function handleComplete(data) {
+            processedData = data.top20;
+            totalAmountAll = data.totalAmountAll;
+
+            // 更新统计
+            document.getElementById('totalCustomers').textContent = data.totalCustomers.toLocaleString();
+            document.getElementById('totalAmount').textContent = '¥' + data.totalAmountAll.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            document.getElementById('top20Percentage').textContent = data.totalAmountAll > 0 
+                ? ((data.top20Amount / data.totalAmountAll) * 100).toFixed(2) + '%' 
+                : '0%';
+
+            // 渲染表格
+            renderTable(data.top20);
+
+            console.log('========== 处理完成 ==========');
+            console.log(`总耗时: ${data.totalTime}秒`);
+            console.log(`数据行数: ${data.totalRows}`);
+            console.log(`客户总数: ${data.totalCustomers}`);
+            console.log(`总金额: ¥${data.totalAmountAll.toLocaleString()}`);
+
+            hideLoading();
+            
+            resultSection.style.display = 'block';
+            resultSection.scrollIntoView({ behavior: 'smooth' });
+            
+            alert(`✅ 处理完成！\n\n总耗时: ${data.totalTime}秒\n数据行数: ${data.totalRows.toLocaleString()}\n客户总数: ${data.totalCustomers.toLocaleString()}\n总金额: ¥${data.totalAmountAll.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}`);
+
+            // 清理Worker
+            if (worker) {
+                worker.terminate();
+                worker = null;
+            }
+        }
+
+        function renderTable(data) {
+            const tbody = document.getElementById('resultTable');
+            tbody.innerHTML = '';
+
+            data.forEach((customer, index) => {
+                const rank = index + 1;
+                const percentage = totalAmountAll > 0 
+                    ? ((customer.totalAmount / totalAmountAll) * 100).toFixed(2) 
+                    : 0;
+
+                let rankClass = 'rank-other';
+                if (rank === 1) rankClass = 'rank-1';
+                else if (rank === 2) rankClass = 'rank-2';
+                else if (rank === 3) rankClass = 'rank-3';
+
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td class="rank"><span class="rank-badge ${rankClass}">${rank}</span></td>
+                    <td>${escapeHtml(customer.customerCode)}</td>
+                    <td class="customer-name" title="${escapeHtml(customer.customerName)}">${escapeHtml(customer.customerName) || '-'}</td>
+                    <td>${customer.orderCount.toLocaleString()}</td>
+                    <td>¥${customer.payAmount.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                    <td>¥${customer.rechargeDeduction.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                    <td class="amount">¥${customer.totalAmount.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                    <td class="percentage">${percentage}%</td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        function exportResult() {
+            if (processedData.length === 0) {
+                alert('没有数据可导出');
+                return;
+            }
+
+            const exportData = processedData.map((customer, index) => ({
+                '排名': index + 1,
+                '客户编码': customer.customerCode,
+                '客户名称': customer.customerName,
+                '订单数': customer.orderCount,
+                '支付金额': customer.payAmount,
+                '充值抵扣': customer.rechargeDeduction,
+                '总金额': customer.totalAmount,
+                '占比': totalAmountAll > 0 ? ((customer.totalAmount / totalAmountAll) * 100).toFixed(2) + '%' : '0%'
+            }));
+
+            const ws = XLSX.utils.json_to_sheet(exportData);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, '前20大客户');
+
+            ws['!cols'] = [
+                { wch: 6 }, { wch: 15 }, { wch: 25 }, { wch: 10 },
+                { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 10 }
+            ];
+
+            XLSX.writeFile(wb, 'Top20客户分析结果.xlsx');
+        }
+
+        function escapeHtml(text) {
+            if (!text) return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+    </script>
+</body>
+</html>

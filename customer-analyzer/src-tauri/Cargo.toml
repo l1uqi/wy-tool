@@ -1,0 +1,34 @@
+[package]
+name = "customer-analyzer"
+version = "1.0.0"
+description = "客户分析工具"
+authors = ["you"]
+edition = "2021"
+
+[lib]
+name = "customer_analyzer_lib"
+crate-type = ["lib", "cdylib", "staticlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-shell = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+calamine = "0.26"
+thiserror = "1"
+rayon = "1.10"
+tokio = { version = "1", features = ["rt-multi-thread", "sync"] }
+chrono = "0.4"
+regex-lite = "0.1"
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = "z"
+strip = true
+
