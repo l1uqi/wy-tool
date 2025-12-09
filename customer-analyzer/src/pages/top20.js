@@ -435,11 +435,19 @@ export class Top20Page {
         this.hideLoading();
     }
     
-    exportResult() {
+    async exportResult() {
         if (this.processedData.length === 0) {
             this.showError('没有数据可导出');
             return;
         }
+        
+        if (!window.__TAURI__) {
+            this.showError('Tauri API 不可用');
+            return;
+        }
+        
+        const { invoke } = window.__TAURI__.core;
+        const { save } = window.__TAURI__.dialog;
         
         // 生成CSV数据
         const headers = ['排名', '客户编码', '客户名称', '订单数', '支付金额', '充值抵扣', '总金额', '占比'];
@@ -469,14 +477,31 @@ export class Top20Page {
             }).join(',') + '\n';
         });
         
-        // 创建下载
-        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-        const link = document.createElement('a');
-        link.href = URL.createObjectURL(blob);
-        link.download = `Top20客户分析结果_${new Date().toISOString().slice(0,10)}.csv`;
-        link.click();
-        
-        this.showToast('✅ 导出成功！');
+        try {
+            // 打开保存文件对话框
+            const filePath = await save({
+                defaultPath: `Top20客户分析结果_${new Date().toISOString().slice(0,10)}.csv`,
+                filters: [{
+                    name: 'CSV文件',
+                    extensions: ['csv']
+                }]
+            });
+            
+            if (filePath) {
+                // 调用后端命令保存文件
+                await invoke('save_export_file', {
+                    filePath: filePath,
+                    content: csvContent
+                });
+                
+                this.showToast('✅ 导出成功！');
+            }
+        } catch (error) {
+            console.error('导出失败:', error);
+            if (error !== '用户取消操作') {
+                this.showError('导出失败: ' + error);
+            }
+        }
     }
     
     escapeHtml(text) {

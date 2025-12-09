@@ -127,10 +127,16 @@ export class MonthlyPage {
                                 <div class="stat-value" id="processTime">0ms</div>
                             </div>
                         </div>
-                        <button class="btn btn-primary" id="exportBtn">
-                            <span>📥</span>
-                            导出数据
-                        </button>
+                        <div style="display: flex; gap: 12px;">
+                            <button class="btn btn-primary" id="exportBtn">
+                                <span>📥</span>
+                                导出汇总
+                            </button>
+                            <button class="btn btn-secondary" id="exportDetailsBtn">
+                                <span>📋</span>
+                                导出明细
+                            </button>
+                        </div>
                     </div>
                     
                     <!-- 图表区域 -->
@@ -396,6 +402,7 @@ export class MonthlyPage {
         const goToHomeBtn = container.querySelector('#goToHomeBtn');
         const cancelBtn = container.querySelector('#cancelBtn');
         const exportBtn = container.querySelector('#exportBtn');
+        const exportDetailsBtn = container.querySelector('#exportDetailsBtn');
         const analyzeBtn = container.querySelector('#analyzeBtn');
         const optionTabs = container.querySelectorAll('.option-tab');
         const targetSelect = container.querySelector('#targetSelect');
@@ -412,6 +419,10 @@ export class MonthlyPage {
         
         if (exportBtn) {
             exportBtn.addEventListener('click', () => this.exportResult());
+        }
+        
+        if (exportDetailsBtn) {
+            exportDetailsBtn.addEventListener('click', () => this.exportOrderDetails());
         }
         
         if (analyzeBtn) {
@@ -795,11 +806,19 @@ export class MonthlyPage {
         this.hideLoading();
     }
     
-    exportResult() {
+    async exportResult() {
         if (!this.analysisResult || this.analysisResult.monthly_data.length === 0) {
             this.showError('没有数据可导出');
             return;
         }
+        
+        if (!window.__TAURI__) {
+            this.showError('Tauri API 不可用');
+            return;
+        }
+        
+        const { invoke } = window.__TAURI__.core;
+        const { save } = window.__TAURI__.dialog;
         
         const result = this.analysisResult;
         const headers = ['月份', '订单数', '支付金额', '充值抵扣', '总金额', '环比增长率'];
@@ -812,16 +831,128 @@ export class MonthlyPage {
             item.mom_growth_rate.toFixed(2) + '%'
         ]);
         
-        let csv = '\uFEFF' + headers.join(',') + '\n';
-        rows.forEach(row => { csv += row.join(',') + '\n'; });
+        // 添加BOM以支持中文
+        let csvContent = '\uFEFF' + headers.join(',') + '\n';
+        rows.forEach(row => {
+            csvContent += row.map(cell => {
+                const str = String(cell);
+                if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+                    return '"' + str.replace(/"/g, '""') + '"';
+                }
+                return str;
+            }).join(',') + '\n';
+        });
         
-        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-        const link = document.createElement('a');
-        link.href = URL.createObjectURL(blob);
-        link.download = `月度销售分析_${result.target}.csv`;
-        link.click();
+        try {
+            const filePath = await save({
+                defaultPath: `月度销售分析汇总_${result.target_name || result.target}_${new Date().toISOString().slice(0,10)}.csv`,
+                filters: [{
+                    name: 'CSV文件',
+                    extensions: ['csv']
+                }]
+            });
+            
+            if (filePath) {
+                await invoke('save_export_file', {
+                    filePath: filePath,
+                    content: csvContent
+                });
+                
+                this.showToast('✅ 导出成功！');
+            }
+        } catch (error) {
+            console.error('导出失败:', error);
+            if (error !== '用户取消操作') {
+                this.showError('导出失败: ' + error);
+            }
+        }
+    }
+    
+    async exportOrderDetails() {
+        if (!this.analysisResult) {
+            this.showError('请先进行分析');
+            return;
+        }
         
-        this.showToast('✅ 导出成功！');
+        if (!window.__TAURI__) {
+            this.showError('Tauri API 不可用');
+            return;
+        }
+        
+        const { invoke } = window.__TAURI__.core;
+        const { save } = window.__TAURI__.dialog;
+        
+        try {
+            // 获取订单明细
+            const activeTab = document.querySelector('.option-tab.active');
+            const analysisType = activeTab?.dataset.type || 'customer';
+            const targetSelect = document.getElementById('targetSelect');
+            const target = targetSelect?.value || '';
+            
+            if (!target) {
+                this.showError('请先选择分析目标');
+                return;
+            }
+            
+            const orderDetails = await invoke('get_order_details', {
+                analysisType,
+                target
+            });
+            
+            if (!orderDetails || orderDetails.length === 0) {
+                this.showError('没有订单明细可导出');
+                return;
+            }
+            
+            // 生成CSV数据
+            const headers = ['客户编码', '客户名称', '支付金额', '充值抵扣', '总金额', '省份', '城市', '区县', '地区', '月份'];
+            const rows = orderDetails.map(row => [
+                row.customer_code || '',
+                row.customer_name || '',
+                row.pay_amount.toFixed(2),
+                row.recharge_deduction.toFixed(2),
+                row.total_amount.toFixed(2),
+                row.province || '',
+                row.city || '',
+                row.district || '',
+                row.region || '',
+                row.month || ''
+            ]);
+            
+            // 添加BOM以支持中文
+            let csvContent = '\uFEFF' + headers.join(',') + '\n';
+            rows.forEach(row => {
+                csvContent += row.map(cell => {
+                    const str = String(cell);
+                    if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+                        return '"' + str.replace(/"/g, '""') + '"';
+                    }
+                    return str;
+                }).join(',') + '\n';
+            });
+            
+            const filePath = await save({
+                defaultPath: `订单明细_${this.analysisResult.target_name || this.analysisResult.target}_${new Date().toISOString().slice(0,10)}.csv`,
+                filters: [{
+                    name: 'CSV文件',
+                    extensions: ['csv']
+                }]
+            });
+            
+            if (filePath) {
+                await invoke('save_export_file', {
+                    filePath: filePath,
+                    content: csvContent
+                });
+                
+                this.showToast(`✅ 导出成功！共 ${orderDetails.length.toLocaleString()} 条订单明细`);
+            }
+        } catch (error) {
+            console.error('导出订单明细失败:', error);
+            if (error !== '用户取消操作') {
+                this.showError('导出订单明细失败: ' + error);
+            }
+        }
     }
     
     showError(msg) { alert(msg); }

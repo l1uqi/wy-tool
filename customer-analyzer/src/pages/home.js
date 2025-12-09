@@ -279,12 +279,6 @@ export class HomePage {
             return;
         }
         
-        // 先确认，再删除
-        const confirmed = confirm('确定要删除这个数据源吗？删除后无法恢复。');
-        if (!confirmed) {
-            return;
-        }
-        
         const { invoke } = window.__TAURI__.core;
         
         try {

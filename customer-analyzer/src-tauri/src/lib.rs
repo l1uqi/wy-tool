@@ -854,6 +854,59 @@ fn cancel_analysis(state: State<'_, AppState>) {
     *flag = true;
 }
 
+/// 保存导出文件
+#[tauri::command]
+async fn save_export_file(
+    file_path: String,
+    content: String,
+) -> Result<(), String> {
+    fs::write(&file_path, content)
+        .map_err(|e| format!("保存文件失败: {}", e))?;
+    Ok(())
+}
+
+/// 获取订单明细（用于导出）
+#[tauri::command]
+async fn get_order_details(
+    analysis_type: String,
+    target: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<monthly_analysis::CachedRow>, String> {
+    let data_cache = state.data_cache.clone();
+    
+    let result = tokio::task::spawn_blocking(move || {
+        let cache = data_cache.lock().unwrap();
+        
+        match cache.as_ref() {
+            Some(data) => {
+                let mut details: Vec<monthly_analysis::CachedRow> = Vec::new();
+                
+                for row in &data.cached_rows {
+                    let matches = match analysis_type.as_str() {
+                        "customer" => row.customer_code == target,
+                        "province" => row.province.as_ref().map_or(false, |p| p == &target),
+                        "city" => row.city.as_ref().map_or(false, |c| c == &target),
+                        "district" => row.district.as_ref().map_or(false, |d| d == &target),
+                        "region" => row.region.as_ref().map_or(false, |r| r == &target),
+                        _ => false,
+                    };
+                    
+                    if matches {
+                        details.push(row.clone());
+                    }
+                }
+                
+                Ok(details)
+            },
+            None => Err("请先在首页导入数据源".to_string()),
+        }
+    })
+    .await
+    .map_err(|e| format!("任务执行失败: {}", e))??;
+
+    Ok(result)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -877,7 +930,9 @@ pub fn run() {
             get_monthly_options,
             analyze_monthly_cached,
             clear_data_cache,
-            cancel_analysis
+            cancel_analysis,
+            save_export_file,
+            get_order_details
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
