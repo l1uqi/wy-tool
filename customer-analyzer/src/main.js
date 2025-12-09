@@ -36,7 +36,7 @@ class App {
             <nav class="navbar">
                 <a class="navbar-brand" data-page="home">
                     <div class="logo">📊</div>
-                    <span>客户分析工具</span>
+                    <span>婉怡的工具箱</span>
                 </a>
                 <div class="navbar-nav">
                     <a class="nav-link" data-page="home">首页</a>

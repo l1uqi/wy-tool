@@ -1,7 +1,7 @@
 [package]
 name = "customer-analyzer"
 version = "1.0.0"
-description = "客户分析工具"
+description = "婉怡的工具箱"
 authors = ["you"]
 edition = "2021"
 
@@ -24,6 +24,7 @@ rayon = "1.10"
 tokio = { version = "1", features = ["rt-multi-thread", "sync"] }
 chrono = "0.4"
 regex-lite = "0.1"
+dirs = "5.0"
 
 [profile.release]
 panic = "abort"

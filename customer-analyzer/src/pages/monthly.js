@@ -1,8 +1,4 @@
 // 月度销售分析页面
-const { invoke } = window.__TAURI__.core;
-const { open } = window.__TAURI__.dialog;
-const { listen } = window.__TAURI__.event;
-
 export class MonthlyPage {
     constructor(app) {
         this.app = app;
@@ -16,7 +12,7 @@ export class MonthlyPage {
         this.currentDimension = 'customer';
     }
     
-    render(container) {
+    async render(container) {
         container.innerHTML = `
             <div class="page-container">
                 <div class="page-header slide-up">
@@ -25,17 +21,28 @@ export class MonthlyPage {
                         月度销售分析
                     </h1>
                     <p class="page-desc">
-                        按客户或地区分析月度销售趋势，支持多维度数据汇总
+                        使用已导入的数据源，按客户或地区分析月度销售趋势
                     </p>
                 </div>
                 
-                <div class="upload-section slide-up">
-                    <div class="upload-area" id="uploadArea">
-                        <div class="upload-icon">📁</div>
-                        <div class="upload-text">点击选择 Excel 文件</div>
-                        <div class="upload-hint">支持 .xlsx, .xls 格式</div>
+                <div class="data-source-notice slide-up" id="dataSourceNotice" style="display: none;">
+                    <div class="notice-card">
+                        <div class="notice-icon">⚠️</div>
+                        <div class="notice-content">
+                            <h4>未导入数据源</h4>
+                            <p>请先在首页导入数据源，然后才能进行分析</p>
+                            <button class="btn btn-primary" id="goToHomeBtn">前往首页导入</button>
+                        </div>
                     </div>
-                    <div class="file-info" id="fileInfo"></div>
+                </div>
+                
+                <div class="upload-section slide-up" id="uploadSection" style="display: none;">
+                    <div class="data-source-info-card">
+                        <div class="ds-info-header">
+                            <span class="ds-info-label">当前数据源：</span>
+                            <span class="ds-info-value" id="currentDataSource">-</span>
+                        </div>
+                    </div>
                     
                     <div class="info-box">
                         <h4>📌 所需列名说明</h4>
@@ -271,9 +278,75 @@ export class MonthlyPage {
         
         this.bindEvents(container);
         this.setupProgressListener();
+        await this.checkDataSource();
+    }
+    
+    async checkDataSource() {
+        if (!window.__TAURI__) return;
+        
+        const { invoke } = window.__TAURI__.core;
+        
+        try {
+            const info = await invoke('get_data_source_info');
+            if (info && info.file_path) {
+                // 有数据源，显示分析选项
+                document.getElementById('uploadSection').style.display = 'block';
+                document.getElementById('dataSourceNotice').style.display = 'none';
+                document.getElementById('currentDataSource').textContent = info.file_name || '未知文件';
+                
+                // 尝试自动加载数据源
+                try {
+                    await invoke('auto_load_data_source');
+                    // 加载选项
+                    await this.loadOptions();
+                } catch (error) {
+                    console.error('自动加载数据源失败:', error);
+                }
+            } else {
+                // 没有数据源，显示提示
+                document.getElementById('uploadSection').style.display = 'none';
+                document.getElementById('dataSourceNotice').style.display = 'block';
+                document.getElementById('analysisOptions').style.display = 'none';
+            }
+        } catch (error) {
+            console.error('检查数据源失败:', error);
+            document.getElementById('uploadSection').style.display = 'none';
+            document.getElementById('dataSourceNotice').style.display = 'block';
+            document.getElementById('analysisOptions').style.display = 'none';
+        }
+    }
+    
+    async loadOptions() {
+        if (!window.__TAURI__) return;
+        
+        const { invoke } = window.__TAURI__.core;
+        
+        try {
+            const result = await invoke('get_monthly_options');
+            if (result) {
+                this.fileOptions = result;
+                this.isDataLoaded = true;
+                
+                // 更新维度标签状态
+                this.updateTabStates(result);
+                
+                // 初始化目标选择
+                this.updateTargetSelect();
+                
+                document.getElementById('analysisOptions').style.display = 'block';
+                document.getElementById('cacheStatus').textContent = '✅ 数据已缓存';
+            }
+        } catch (error) {
+            console.error('加载选项失败:', error);
+            this.showError('加载选项失败: ' + error);
+        }
     }
     
     async setupProgressListener() {
+        if (!window.__TAURI__) return;
+        
+        const { listen } = window.__TAURI__.event;
+        
         if (this.unlistenProgress) {
             this.unlistenProgress();
         }
@@ -284,19 +357,34 @@ export class MonthlyPage {
     }
     
     bindEvents(container) {
-        const uploadArea = container.querySelector('#uploadArea');
+        const goToHomeBtn = container.querySelector('#goToHomeBtn');
         const cancelBtn = container.querySelector('#cancelBtn');
         const exportBtn = container.querySelector('#exportBtn');
         const analyzeBtn = container.querySelector('#analyzeBtn');
         const optionTabs = container.querySelectorAll('.option-tab');
         const targetSelect = container.querySelector('#targetSelect');
         
-        uploadArea.addEventListener('click', () => this.selectFile());
-        cancelBtn.addEventListener('click', () => this.cancelProcessing());
-        exportBtn.addEventListener('click', () => this.exportResult());
-        analyzeBtn.addEventListener('click', () => this.runAnalysis());
+        if (goToHomeBtn) {
+            goToHomeBtn.addEventListener('click', () => {
+                window.location.hash = 'home';
+            });
+        }
         
-        targetSelect.addEventListener('change', () => this.updateAnalyzeButton());
+        if (cancelBtn) {
+            cancelBtn.addEventListener('click', () => this.cancelProcessing());
+        }
+        
+        if (exportBtn) {
+            exportBtn.addEventListener('click', () => this.exportResult());
+        }
+        
+        if (analyzeBtn) {
+            analyzeBtn.addEventListener('click', () => this.runAnalysis());
+        }
+        
+        if (targetSelect) {
+            targetSelect.addEventListener('change', () => this.updateAnalyzeButton());
+        }
         
         optionTabs.forEach(tab => {
             tab.addEventListener('click', () => {
@@ -364,55 +452,6 @@ export class MonthlyPage {
         this.updateAnalyzeButton();
     }
     
-    async selectFile() {
-        try {
-            const selected = await open({
-                multiple: false,
-                filters: [{ name: 'Excel文件', extensions: ['xlsx', 'xls'] }]
-            });
-            
-            if (selected) {
-                this.currentFilePath = selected;
-                await this.loadFileAndCache(selected);
-            }
-        } catch (error) {
-            this.showError('选择文件失败: ' + error);
-        }
-    }
-    
-    async loadFileAndCache(filePath) {
-        const fileName = filePath.split(/[/\\]/).pop();
-        
-        const fileInfo = document.getElementById('fileInfo');
-        fileInfo.innerHTML = `📄 已选择文件: <strong>${fileName}</strong>`;
-        fileInfo.classList.add('visible');
-        
-        this.showLoading('步骤 1/3', '正在加载数据...', 0, '');
-        
-        try {
-            const result = await invoke('load_monthly_file', { filePath });
-            
-            this.hideLoading();
-            this.fileOptions = result;
-            this.isDataLoaded = true;
-            
-            // 更新维度标签状态
-            this.updateTabStates(result);
-            
-            // 初始化目标选择
-            this.updateTargetSelect();
-            
-            document.getElementById('analysisOptions').style.display = 'block';
-            document.getElementById('cacheStatus').textContent = '✅ 数据已缓存';
-            
-            this.showToast(`✅ 数据已加载！(${result.load_time_ms}ms) 共 ${result.total_rows} 行`);
-            
-        } catch (error) {
-            this.hideLoading();
-            this.isDataLoaded = false;
-            this.showError('加载文件失败: ' + error);
-        }
-    }
     
     updateTabStates(result) {
         const tabs = document.querySelectorAll('.option-tab');
@@ -432,8 +471,16 @@ export class MonthlyPage {
     }
     
     async runAnalysis() {
+        if (!window.__TAURI__) {
+            this.showError('Tauri API 不可用');
+            return;
+        }
+        
+        const { invoke } = window.__TAURI__.core;
+        
         if (!this.isDataLoaded) {
-            this.showError('请先加载Excel文件');
+            this.showError('请先在首页导入数据源');
+            await this.checkDataSource();
             return;
         }
         
@@ -701,6 +748,13 @@ export class MonthlyPage {
     }
     
     async cancelProcessing() {
+        if (!window.__TAURI__) {
+            this.hideLoading();
+            return;
+        }
+        
+        const { invoke } = window.__TAURI__.core;
+        
         try { await invoke('cancel_analysis'); } catch (e) {}
         this.hideLoading();
     }

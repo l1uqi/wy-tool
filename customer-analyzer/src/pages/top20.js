@@ -1,8 +1,4 @@
 // 前20大客户分析页面
-const { invoke } = window.__TAURI__.core;
-const { open } = window.__TAURI__.dialog;
-const { listen } = window.__TAURI__.event;
-
 export class Top20Page {
     constructor(app) {
         this.app = app;
@@ -13,7 +9,7 @@ export class Top20Page {
         this.unlistenProgress = null;
     }
     
-    render(container) {
+    async render(container) {
         container.innerHTML = `
             <div class="page-container">
                 <div class="page-header slide-up">
@@ -22,17 +18,32 @@ export class Top20Page {
                         前20大客户分析
                     </h1>
                     <p class="page-desc">
-                        上传 Excel 文件，使用 Rust 高性能引擎快速分析客户数据
+                        使用已导入的数据源进行分析，快速生成前20大客户排行榜
                     </p>
                 </div>
                 
-                <div class="upload-section slide-up">
-                    <div class="upload-area" id="uploadArea">
-                        <div class="upload-icon">📁</div>
-                        <div class="upload-text">点击选择 Excel 文件</div>
-                        <div class="upload-hint">支持 .xlsx, .xls 格式（支持大文件，百万级数据）</div>
+                <div class="data-source-notice slide-up" id="dataSourceNotice" style="display: none;">
+                    <div class="notice-card">
+                        <div class="notice-icon">⚠️</div>
+                        <div class="notice-content">
+                            <h4>未导入数据源</h4>
+                            <p>请先在首页导入数据源，然后才能进行分析</p>
+                            <button class="btn btn-primary" id="goToHomeBtn">前往首页导入</button>
+                        </div>
                     </div>
-                    <div class="file-info" id="fileInfo"></div>
+                </div>
+                
+                <div class="upload-section slide-up" id="uploadSection" style="display: none;">
+                    <div class="data-source-info-card">
+                        <div class="ds-info-header">
+                            <span class="ds-info-label">当前数据源：</span>
+                            <span class="ds-info-value" id="currentDataSource">加载中...</span>
+                        </div>
+                        <button class="btn btn-primary" id="analyzeBtn">
+                            <span>🔍</span>
+                            开始分析
+                        </button>
+                    </div>
                     
                     <div class="info-box">
                         <h4>📌 所需列名说明</h4>
@@ -43,6 +54,9 @@ export class Top20Page {
                             <li><strong>充值抵扣</strong> - 充值抵扣金额（必需）</li>
                         </ul>
                         <p>💡 金额计算公式：总金额 = 支付金额 + 充值抵扣</p>
+                        <p style="margin-top: 12px; color: var(--accent-green);">
+                            ✅ 数据源已加载，点击"开始分析"按钮即可生成前20大客户排行榜
+                        </p>
                     </div>
                 </div>
                 
@@ -114,9 +128,73 @@ export class Top20Page {
         
         this.bindEvents(container);
         this.setupProgressListener();
+        // 确保DOM已经渲染后再检查数据源
+        await this.checkDataSource();
+    }
+    
+    async checkDataSource() {
+        if (!window.__TAURI__) {
+            console.warn('Tauri API 不可用');
+            // 即使没有Tauri API，也显示提示
+            const uploadSection = document.getElementById('uploadSection');
+            const dataSourceNotice = document.getElementById('dataSourceNotice');
+            if (uploadSection) uploadSection.style.display = 'none';
+            if (dataSourceNotice) dataSourceNotice.style.display = 'block';
+            return;
+        }
+        
+        const { invoke } = window.__TAURI__.core;
+        
+        // 等待一下确保DOM已经渲染
+        await new Promise(resolve => setTimeout(resolve, 50));
+        
+        const uploadSection = document.getElementById('uploadSection');
+        const dataSourceNotice = document.getElementById('dataSourceNotice');
+        const currentDataSource = document.getElementById('currentDataSource');
+        
+        if (!uploadSection || !dataSourceNotice) {
+            console.error('DOM元素未找到:', { uploadSection: !!uploadSection, dataSourceNotice: !!dataSourceNotice });
+            return;
+        }
+        
+        try {
+            const info = await invoke('get_data_source_info');
+            console.log('前20大客户分析 - 数据源信息:', info);
+            
+            if (info && info.file_path && info.file_path.trim() !== '') {
+                // 有数据源，显示分析按钮
+                uploadSection.style.display = 'block';
+                dataSourceNotice.style.display = 'none';
+                if (currentDataSource) {
+                    currentDataSource.textContent = info.file_name || info.file_path.split(/[/\\]/).pop() || '未知文件';
+                }
+                
+                // 尝试自动加载数据源（如果还没有加载）
+                try {
+                    const loadResult = await invoke('auto_load_data_source');
+                    console.log('前20大客户分析 - 自动加载数据源结果:', loadResult);
+                } catch (error) {
+                    console.warn('前20大客户分析 - 自动加载数据源失败（可能已经加载）:', error);
+                    // 即使加载失败，也显示分析按钮（可能数据已经在缓存中）
+                }
+            } else {
+                // 没有数据源，显示提示
+                uploadSection.style.display = 'none';
+                dataSourceNotice.style.display = 'block';
+                console.log('前20大客户分析 - 未找到数据源');
+            }
+        } catch (error) {
+            console.error('前20大客户分析 - 检查数据源失败:', error);
+            uploadSection.style.display = 'none';
+            dataSourceNotice.style.display = 'block';
+        }
     }
     
     async setupProgressListener() {
+        if (!window.__TAURI__) return;
+        
+        const { listen } = window.__TAURI__.event;
+        
         // 监听Rust后端的进度事件
         if (this.unlistenProgress) {
             this.unlistenProgress();
@@ -129,70 +207,56 @@ export class Top20Page {
     }
     
     bindEvents(container) {
-        const uploadArea = container.querySelector('#uploadArea');
+        const analyzeBtn = container.querySelector('#analyzeBtn');
+        const goToHomeBtn = container.querySelector('#goToHomeBtn');
         const cancelBtn = container.querySelector('#cancelBtn');
         const exportBtn = container.querySelector('#exportBtn');
         
-        uploadArea.addEventListener('click', () => this.selectFile());
-        cancelBtn.addEventListener('click', () => this.cancelProcessing());
-        exportBtn.addEventListener('click', () => this.exportResult());
+        if (analyzeBtn) {
+            analyzeBtn.addEventListener('click', () => this.runAnalysis());
+        }
         
-        // 拖拽支持（虽然Tauri桌面应用可能用不上，但保留兼容性）
-        uploadArea.addEventListener('dragover', (e) => {
-            e.preventDefault();
-            uploadArea.classList.add('dragover');
-        });
-        
-        uploadArea.addEventListener('dragleave', () => {
-            uploadArea.classList.remove('dragover');
-        });
-        
-        uploadArea.addEventListener('drop', (e) => {
-            e.preventDefault();
-            uploadArea.classList.remove('dragover');
-        });
-    }
-    
-    async selectFile() {
-        try {
-            const selected = await open({
-                multiple: false,
-                filters: [{
-                    name: 'Excel文件',
-                    extensions: ['xlsx', 'xls']
-                }]
+        if (goToHomeBtn) {
+            goToHomeBtn.addEventListener('click', () => {
+                window.location.hash = 'home';
             });
-            
-            if (selected) {
-                await this.processFile(selected);
-            }
-        } catch (error) {
-            console.error('选择文件失败:', error);
-            this.showError('选择文件失败: ' + error);
+        }
+        
+        if (cancelBtn) {
+            cancelBtn.addEventListener('click', () => this.cancelProcessing());
+        }
+        
+        if (exportBtn) {
+            exportBtn.addEventListener('click', () => this.exportResult());
         }
     }
     
-    async processFile(filePath) {
-        const fileName = filePath.split(/[/\\]/).pop();
+    async runAnalysis() {
+        if (!window.__TAURI__) {
+            this.showError('Tauri API 不可用');
+            return;
+        }
         
-        // 显示文件信息
-        const fileInfo = document.getElementById('fileInfo');
-        fileInfo.innerHTML = `📄 已选择文件: <strong>${fileName}</strong>`;
-        fileInfo.classList.add('visible');
+        const { invoke } = window.__TAURI__.core;
         
         // 显示加载界面
-        this.showLoading('步骤 1/4', '准备处理文件...', 0, '');
+        this.showLoading('步骤 1/3', '正在分析数据...', 0, '');
         
         try {
-            // 调用Rust后端处理Excel
-            const result = await invoke('analyze_excel', { filePath });
+            // 使用缓存数据进行分析
+            const result = await invoke('analyze_top20_cached');
             
             this.handleResult(result);
         } catch (error) {
             this.hideLoading();
             if (error !== '用户取消操作') {
-                console.error('处理失败:', error);
-                this.showError('处理失败: ' + error);
+                console.error('分析失败:', error);
+                this.showError('分析失败: ' + error);
+                
+                // 如果是因为没有数据源，显示提示
+                if (error.includes('数据源') || error.includes('导入')) {
+                    await this.checkDataSource();
+                }
             }
         }
     }
@@ -332,6 +396,13 @@ export class Top20Page {
     }
     
     async cancelProcessing() {
+        if (!window.__TAURI__) {
+            this.hideLoading();
+            return;
+        }
+        
+        const { invoke } = window.__TAURI__.core;
+        
         try {
             await invoke('cancel_analysis');
         } catch (error) {

@@ -1,7 +1,7 @@
 {
   "name": "customer-analyzer",
   "version": "1.0.0",
-  "description": "客户分析工具 - 使用Tauri和Rust构建",
+  "description": "婉怡的工具箱 - 使用Tauri和Rust构建",
   "type": "module",
   "scripts": {
     "dev": "vite",
