@@ -36,8 +36,12 @@ export class Top20Page {
                 <div class="upload-section slide-up" id="uploadSection" style="display: none;">
                     <div class="data-source-info-card">
                         <div class="ds-info-header">
-                            <span class="ds-info-label">当前数据源：</span>
-                            <span class="ds-info-value" id="currentDataSource">加载中...</span>
+                            <div class="ds-select-group">
+                                <label class="ds-info-label">选择数据源：</label>
+                                <select class="select-input" id="dataSourceSelect" style="max-width: 400px;">
+                                    <option value="">加载中...</option>
+                                </select>
+                            </div>
                         </div>
                         <button class="btn btn-primary" id="analyzeBtn">
                             <span>🔍</span>
@@ -135,7 +139,6 @@ export class Top20Page {
     async checkDataSource() {
         if (!window.__TAURI__) {
             console.warn('Tauri API 不可用');
-            // 即使没有Tauri API，也显示提示
             const uploadSection = document.getElementById('uploadSection');
             const dataSourceNotice = document.getElementById('dataSourceNotice');
             if (uploadSection) uploadSection.style.display = 'none';
@@ -145,49 +148,70 @@ export class Top20Page {
         
         const { invoke } = window.__TAURI__.core;
         
-        // 等待一下确保DOM已经渲染
         await new Promise(resolve => setTimeout(resolve, 50));
         
         const uploadSection = document.getElementById('uploadSection');
         const dataSourceNotice = document.getElementById('dataSourceNotice');
-        const currentDataSource = document.getElementById('currentDataSource');
+        const dataSourceSelect = document.getElementById('dataSourceSelect');
         
         if (!uploadSection || !dataSourceNotice) {
-            console.error('DOM元素未找到:', { uploadSection: !!uploadSection, dataSourceNotice: !!dataSourceNotice });
+            console.error('DOM元素未找到');
             return;
         }
         
         try {
-            const info = await invoke('get_data_source_info');
-            console.log('前20大客户分析 - 数据源信息:', info);
+            const listInfo = await invoke('get_data_source_list_info');
+            console.log('前20大客户分析 - 数据源列表:', listInfo);
             
-            if (info && info.file_path && info.file_path.trim() !== '') {
-                // 有数据源，显示分析按钮
+            if (listInfo && listInfo.data_sources && listInfo.data_sources.length > 0) {
+                // 有数据源，显示分析选项
                 uploadSection.style.display = 'block';
                 dataSourceNotice.style.display = 'none';
-                if (currentDataSource) {
-                    currentDataSource.textContent = info.file_name || info.file_path.split(/[/\\]/).pop() || '未知文件';
-                }
                 
-                // 尝试自动加载数据源（如果还没有加载）
-                try {
-                    const loadResult = await invoke('auto_load_data_source');
-                    console.log('前20大客户分析 - 自动加载数据源结果:', loadResult);
-                } catch (error) {
-                    console.warn('前20大客户分析 - 自动加载数据源失败（可能已经加载）:', error);
-                    // 即使加载失败，也显示分析按钮（可能数据已经在缓存中）
+                // 填充数据源选择下拉框
+                dataSourceSelect.innerHTML = listInfo.data_sources.map(ds => {
+                    const selected = listInfo.current_id === ds.id ? 'selected' : '';
+                    return `<option value="${ds.id}" ${selected}>${this.escapeHtml(ds.file_name)} (${ds.total_rows.toLocaleString()} 行)</option>`;
+                }).join('');
+                
+                // 监听数据源切换
+                dataSourceSelect.addEventListener('change', async (e) => {
+                    const selectedId = e.target.value;
+                    if (selectedId) {
+                        try {
+                            await invoke('switch_data_source', { dataSourceId: selectedId });
+                            this.showToast('✅ 已切换到该数据源');
+                        } catch (error) {
+                            this.showError('切换数据源失败: ' + error);
+                        }
+                    }
+                });
+                
+                // 如果有当前数据源，自动加载
+                if (listInfo.current_id) {
+                    try {
+                        await invoke('auto_load_data_source');
+                    } catch (error) {
+                        console.warn('自动加载数据源失败:', error);
+                    }
                 }
             } else {
                 // 没有数据源，显示提示
                 uploadSection.style.display = 'none';
                 dataSourceNotice.style.display = 'block';
-                console.log('前20大客户分析 - 未找到数据源');
             }
         } catch (error) {
             console.error('前20大客户分析 - 检查数据源失败:', error);
             uploadSection.style.display = 'none';
             dataSourceNotice.style.display = 'block';
         }
+    }
+    
+    escapeHtml(text) {
+        if (!text) return '';
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
     }
     
     async setupProgressListener() {

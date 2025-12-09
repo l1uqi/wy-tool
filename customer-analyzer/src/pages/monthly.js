@@ -39,8 +39,12 @@ export class MonthlyPage {
                 <div class="upload-section slide-up" id="uploadSection" style="display: none;">
                     <div class="data-source-info-card">
                         <div class="ds-info-header">
-                            <span class="ds-info-label">当前数据源：</span>
-                            <span class="ds-info-value" id="currentDataSource">-</span>
+                            <div class="ds-select-group">
+                                <label class="ds-info-label">选择数据源：</label>
+                                <select class="select-input" id="dataSourceSelect" style="max-width: 400px;">
+                                    <option value="">加载中...</option>
+                                </select>
+                            </div>
                         </div>
                     </div>
                     
@@ -286,34 +290,66 @@ export class MonthlyPage {
         
         const { invoke } = window.__TAURI__.core;
         
+        const uploadSection = document.getElementById('uploadSection');
+        const dataSourceNotice = document.getElementById('dataSourceNotice');
+        const dataSourceSelect = document.getElementById('dataSourceSelect');
+        
         try {
-            const info = await invoke('get_data_source_info');
-            if (info && info.file_path) {
+            const listInfo = await invoke('get_data_source_list_info');
+            
+            if (listInfo && listInfo.data_sources && listInfo.data_sources.length > 0) {
                 // 有数据源，显示分析选项
-                document.getElementById('uploadSection').style.display = 'block';
-                document.getElementById('dataSourceNotice').style.display = 'none';
-                document.getElementById('currentDataSource').textContent = info.file_name || '未知文件';
+                uploadSection.style.display = 'block';
+                dataSourceNotice.style.display = 'none';
                 
-                // 尝试自动加载数据源
-                try {
-                    await invoke('auto_load_data_source');
-                    // 加载选项
-                    await this.loadOptions();
-                } catch (error) {
-                    console.error('自动加载数据源失败:', error);
+                // 填充数据源选择下拉框
+                dataSourceSelect.innerHTML = listInfo.data_sources.map(ds => {
+                    const selected = listInfo.current_id === ds.id ? 'selected' : '';
+                    return `<option value="${ds.id}" ${selected}>${this.escapeHtml(ds.file_name)} (${ds.total_rows.toLocaleString()} 行)</option>`;
+                }).join('');
+                
+                // 监听数据源切换
+                dataSourceSelect.addEventListener('change', async (e) => {
+                    const selectedId = e.target.value;
+                    if (selectedId) {
+                        try {
+                            await invoke('switch_data_source', { dataSourceId: selectedId });
+                            this.showToast('✅ 已切换到该数据源');
+                            await this.loadOptions();
+                        } catch (error) {
+                            this.showError('切换数据源失败: ' + error);
+                        }
+                    }
+                });
+                
+                // 如果有当前数据源，自动加载
+                if (listInfo.current_id) {
+                    try {
+                        await invoke('auto_load_data_source');
+                        await this.loadOptions();
+                    } catch (error) {
+                        console.error('自动加载数据源失败:', error);
+                    }
                 }
             } else {
                 // 没有数据源，显示提示
-                document.getElementById('uploadSection').style.display = 'none';
-                document.getElementById('dataSourceNotice').style.display = 'block';
+                uploadSection.style.display = 'none';
+                dataSourceNotice.style.display = 'block';
                 document.getElementById('analysisOptions').style.display = 'none';
             }
         } catch (error) {
             console.error('检查数据源失败:', error);
-            document.getElementById('uploadSection').style.display = 'none';
-            document.getElementById('dataSourceNotice').style.display = 'block';
+            uploadSection.style.display = 'none';
+            dataSourceNotice.style.display = 'block';
             document.getElementById('analysisOptions').style.display = 'none';
         }
+    }
+    
+    escapeHtml(text) {
+        if (!text) return '';
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
     }
     
     async loadOptions() {

@@ -867,6 +867,109 @@ tr:hover td {
     width: 100%;
 }
 
+/* ========== 数据源列表 ========== */
+.data-source-list {
+    margin-top: 20px;
+}
+
+.data-source-items {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.data-source-item {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 16px 20px;
+    transition: var(--transition-normal);
+}
+
+.data-source-item:hover {
+    border-color: var(--border-accent);
+    box-shadow: var(--shadow-sm);
+}
+
+.data-source-item.current {
+    border-color: var(--accent-blue);
+    background: rgba(59, 130, 246, 0.05);
+}
+
+.ds-item-main {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+}
+
+.ds-item-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.ds-item-name {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.ds-item-name strong {
+    color: var(--text-primary);
+    font-size: 1rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.current-badge {
+    background: var(--accent-blue);
+    color: white;
+    font-size: 0.75rem;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-weight: 500;
+    flex-shrink: 0;
+}
+
+.ds-item-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+}
+
+.ds-item-actions {
+    display: flex;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+.btn-sm {
+    padding: 6px 12px;
+    font-size: 0.85rem;
+}
+
+.btn-danger {
+    background: rgba(244, 63, 94, 0.1);
+    color: var(--accent-rose);
+    border-color: rgba(244, 63, 94, 0.3);
+}
+
+.btn-danger:hover {
+    background: rgba(244, 63, 94, 0.2);
+    border-color: var(--accent-rose);
+}
+
+.data-source-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0;
+}
+
 /* ========== 数据源提示卡片 ========== */
 .data-source-notice {
     margin: 32px auto;
@@ -923,6 +1026,19 @@ tr:hover td {
     display: flex;
     align-items: center;
     gap: 12px;
+    flex-wrap: wrap;
+}
+
+.ds-select-group {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex: 1;
+    min-width: 0;
+}
+
+.ds-select-group label {
+    white-space: nowrap;
 }
 
 .ds-info-label {
@@ -934,5 +1050,76 @@ tr:hover td {
     color: var(--text-primary);
     font-weight: 500;
     font-size: 0.95rem;
+}
+
+/* ========== 导入进度条 ========== */
+.import-progress {
+    margin-top: 20px;
+    padding: 20px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    animation: fadeIn 0.3s ease;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
+.progress-bar-container {
+    width: 100%;
+    height: 8px;
+    background: rgba(148, 163, 184, 0.2);
+    border-radius: 4px;
+    overflow: hidden;
+    margin-bottom: 12px;
+}
+
+.progress-bar {
+    height: 100%;
+    background: linear-gradient(90deg, var(--accent-blue), var(--accent-cyan));
+    border-radius: 4px;
+    transition: width 0.3s ease;
+    width: 0%;
+    animation: progressPulse 1.5s ease-in-out infinite;
+}
+
+@keyframes progressPulse {
+    0%, 100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.8;
+    }
+}
+
+.progress-text {
+    color: var(--text-primary);
+    font-size: 0.9rem;
+    margin: 0;
+    text-align: center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+
+.progress-text::before {
+    content: '⏳';
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    from {
+        transform: rotate(0deg);
+    }
+    to {
+        transform: rotate(360deg);
+    }
 }
 

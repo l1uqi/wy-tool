@@ -22,32 +22,22 @@ export class HomePage {
                     <div class="data-source-card">
                         <div class="data-source-header">
                             <h3>📁 数据源管理</h3>
-                            <span class="data-source-status" id="dataSourceStatus">未导入</span>
-                        </div>
-                        <div class="data-source-content" id="dataSourceContent">
-                            <p class="data-source-hint">请先导入 Excel 数据源，所有分析功能将使用此数据源</p>
                             <button class="btn btn-primary" id="importDataSourceBtn">
                                 <span>📥</span>
-                                导入数据源
+                                添加数据源
                             </button>
                         </div>
-                        <div class="data-source-info" id="dataSourceInfo" style="display: none;">
-                            <div class="info-row">
-                                <span class="info-label">文件名：</span>
-                                <span class="info-value" id="dataSourceFileName">-</span>
+                        <div class="data-source-list" id="dataSourceList">
+                            <p class="data-source-hint" id="emptyHint">
+                                暂无数据源，请点击"添加数据源"按钮导入 Excel 文件
+                            </p>
+                            <div class="data-source-items" id="dataSourceItems"></div>
+                            <div class="import-progress" id="importProgress" style="display: none;">
+                                <div class="progress-bar-container">
+                                    <div class="progress-bar" id="progressBar"></div>
+                                </div>
+                                <p class="progress-text" id="progressText">正在导入数据源...</p>
                             </div>
-                            <div class="info-row">
-                                <span class="info-label">数据行数：</span>
-                                <span class="info-value" id="dataSourceRows">-</span>
-                            </div>
-                            <div class="info-row">
-                                <span class="info-label">导入时间：</span>
-                                <span class="info-value" id="dataSourceTime">-</span>
-                            </div>
-                            <button class="btn btn-secondary" id="changeDataSourceBtn">
-                                <span>🔄</span>
-                                更换数据源
-                            </button>
                         </div>
                     </div>
                 </div>
@@ -137,53 +127,180 @@ export class HomePage {
     }
     
     updateProgress(progress) {
-        const statusEl = document.getElementById('dataSourceStatus');
-        if (statusEl) {
-            statusEl.textContent = `导入中 ${progress.percent}%`;
+        const progressContainer = document.getElementById('importProgress');
+        const progressBar = document.getElementById('progressBar');
+        const progressText = document.getElementById('progressText');
+        
+        if (progressContainer && progressBar && progressText) {
+            progressContainer.style.display = 'block';
+            const percent = Math.round(progress.percent || 0);
+            progressBar.style.width = `${percent}%`;
+            progressText.textContent = `正在导入数据源... ${percent}%`;
+        }
+    }
+    
+    hideProgress() {
+        const progressContainer = document.getElementById('importProgress');
+        if (progressContainer) {
+            progressContainer.style.display = 'none';
         }
     }
     
     async loadDataSourceInfo() {
+        if (!window.__TAURI__) {
+            console.warn('Tauri API 不可用');
+            return;
+        }
+        
+        const { invoke } = window.__TAURI__.core;
+        
+        try {
+            console.log('开始加载数据源列表...');
+            const listInfo = await invoke('get_data_source_list_info');
+            console.log('获取到的数据源列表:', listInfo);
+            this.updateDataSourceUI(listInfo);
+        } catch (error) {
+            console.error('加载数据源信息失败:', error);
+            this.updateDataSourceUI({ data_sources: [], current_id: null });
+        }
+    }
+    
+    updateDataSourceUI(listInfo) {
+        console.log('更新UI，数据源列表:', listInfo);
+        
+        const itemsContainer = document.getElementById('dataSourceItems');
+        const emptyHint = document.getElementById('emptyHint');
+        
+        if (!itemsContainer || !emptyHint) {
+            console.error('DOM元素未找到:', { 
+                itemsContainer: !!itemsContainer, 
+                emptyHint: !!emptyHint
+            });
+            // 如果元素不存在，可能是页面还没渲染完成，延迟重试
+            setTimeout(() => {
+                console.log('延迟重试更新UI...');
+                this.updateDataSourceUI(listInfo);
+            }, 200);
+            return;
+        }
+        
+        if (!listInfo || !listInfo.data_sources || listInfo.data_sources.length === 0) {
+            console.log('没有数据源，显示空提示');
+            emptyHint.style.display = 'block';
+            itemsContainer.innerHTML = '';
+            return;
+        }
+        
+        console.log(`显示 ${listInfo.data_sources.length} 个数据源`);
+        emptyHint.style.display = 'none';
+        
+        this.renderDataSourceItems(itemsContainer, listInfo);
+    }
+    
+    renderDataSourceItems(itemsContainer, listInfo) {
+        
+        itemsContainer.innerHTML = listInfo.data_sources.map(ds => {
+            const isCurrent = listInfo.current_id === ds.id;
+            return `
+                <div class="data-source-item ${isCurrent ? 'current' : ''}" data-id="${ds.id}">
+                    <div class="ds-item-main">
+                        <div class="ds-item-info">
+                            <div class="ds-item-name">
+                                ${isCurrent ? '<span class="current-badge">当前</span>' : ''}
+                                <strong>${this.escapeHtml(ds.file_name)}</strong>
+                            </div>
+                            <div class="ds-item-meta">
+                                <span>${ds.total_rows.toLocaleString()} 行</span>
+                                <span>•</span>
+                                <span>${ds.loaded_at}</span>
+                            </div>
+                        </div>
+                        <div class="ds-item-actions">
+                            ${!isCurrent ? `
+                                <button class="btn btn-sm btn-primary switch-ds-btn" data-id="${ds.id}">
+                                    <span>✓</span> 使用
+                                </button>
+                            ` : ''}
+                            <button class="btn btn-sm btn-danger delete-ds-btn" data-id="${ds.id}">
+                                <span>🗑️</span> 删除
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+        
+        console.log('数据源列表HTML已更新，绑定事件...');
+        
+        // 绑定事件
+        itemsContainer.querySelectorAll('.switch-ds-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const button = e.currentTarget;
+                const id = button.dataset.id;
+                if (id) {
+                    this.switchDataSource(id);
+                }
+            });
+        });
+        
+        itemsContainer.querySelectorAll('.delete-ds-btn').forEach(btn => {
+            btn.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                const button = e.currentTarget;
+                const id = button.dataset.id;
+                if (id) {
+                    await this.deleteDataSource(id);
+                }
+            });
+        });
+        
+        console.log('事件绑定完成');
+    }
+    
+    async switchDataSource(id) {
         if (!window.__TAURI__) return;
         
         const { invoke } = window.__TAURI__.core;
         
         try {
-            const info = await invoke('get_data_source_info');
-            if (info) {
-                this.dataSourceInfo = info;
-                this.updateDataSourceUI(info);
-            } else {
-                this.updateDataSourceUI(null);
-            }
+            await invoke('switch_data_source', { dataSourceId: id });
+            this.showToast('✅ 已切换到该数据源');
+            await this.loadDataSourceInfo();
         } catch (error) {
-            console.error('加载数据源信息失败:', error);
-            this.updateDataSourceUI(null);
+            this.showError('切换数据源失败: ' + error);
         }
     }
     
-    updateDataSourceUI(info) {
-        const contentEl = document.getElementById('dataSourceContent');
-        const infoEl = document.getElementById('dataSourceInfo');
-        const statusEl = document.getElementById('dataSourceStatus');
-        
-        if (info && info.file_path) {
-            // 显示数据源信息
-            contentEl.style.display = 'none';
-            infoEl.style.display = 'block';
-            document.getElementById('dataSourceFileName').textContent = info.file_name || '未知文件';
-            document.getElementById('dataSourceRows').textContent = 
-                info.total_rows > 0 ? info.total_rows.toLocaleString() + ' 行' : '未加载';
-            document.getElementById('dataSourceTime').textContent = info.loaded_at || '-';
-            statusEl.textContent = '已导入';
-            statusEl.className = 'data-source-status status-loaded';
-        } else {
-            // 显示导入提示
-            contentEl.style.display = 'block';
-            infoEl.style.display = 'none';
-            statusEl.textContent = '未导入';
-            statusEl.className = 'data-source-status status-empty';
+    async deleteDataSource(id) {
+        if (!window.__TAURI__) {
+            this.showError('Tauri API 不可用');
+            return;
         }
+        
+        // 先确认，再删除
+        const confirmed = confirm('确定要删除这个数据源吗？删除后无法恢复。');
+        if (!confirmed) {
+            return;
+        }
+        
+        const { invoke } = window.__TAURI__.core;
+        
+        try {
+            await invoke('delete_data_source', { dataSourceId: id });
+            this.showToast('✅ 数据源已删除');
+            await this.loadDataSourceInfo();
+        } catch (error) {
+            this.showError('删除数据源失败: ' + error);
+        }
+    }
+    
+    escapeHtml(text) {
+        if (!text) return '';
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
     }
     
     bindEvents(container) {
@@ -231,31 +348,70 @@ export class HomePage {
             });
             
             if (selected) {
-                const statusEl = document.getElementById('dataSourceStatus');
-                statusEl.textContent = '导入中...';
-                statusEl.className = 'data-source-status status-loading';
+                console.log('选择的文件:', selected);
+                
+                // 显示导入进度提示
+                this.showImportProgress();
                 
                 try {
-                    const result = await invoke('set_data_source', { filePath: selected });
+                    console.log('开始添加数据源...');
+                    const result = await invoke('add_data_source', { filePath: selected });
+                    console.log('添加数据源结果:', result);
                     
-                    this.dataSourceInfo = {
-                        file_path: result.file_path,
-                        file_name: result.file_name,
-                        loaded_at: new Date().toLocaleString('zh-CN'),
-                        total_rows: result.total_rows,
-                    };
+                    // 隐藏进度提示
+                    this.hideProgress();
                     
-                    this.updateDataSourceUI(this.dataSourceInfo);
-                    this.showToast(`✅ 数据源导入成功！共 ${result.total_rows.toLocaleString()} 行数据`);
+                    this.showToast(`✅ 数据源添加成功！共 ${result.total_rows.toLocaleString()} 行数据`);
+                    
+                    // 等待一下确保后端保存完成
+                    await new Promise(resolve => setTimeout(resolve, 200));
+                    
+                    // 重新加载数据源列表
+                    console.log('重新加载数据源列表...');
+                    try {
+                        await this.loadDataSourceInfo();
+                        console.log('数据源列表已刷新');
+                        
+                        // 再次检查，确保UI已更新
+                        setTimeout(() => {
+                            const itemsContainer = document.getElementById('dataSourceItems');
+                            const emptyHint = document.getElementById('emptyHint');
+                            console.log('UI检查:', {
+                                itemsContainer: !!itemsContainer,
+                                emptyHint: !!emptyHint,
+                                itemsCount: itemsContainer?.children.length || 0,
+                                emptyHintDisplay: emptyHint?.style.display
+                            });
+                        }, 300);
+                    } catch (error) {
+                        console.error('刷新数据源列表失败:', error);
+                        // 即使失败也尝试重新加载
+                        setTimeout(() => this.loadDataSourceInfo(), 500);
+                    }
                 } catch (error) {
-                    statusEl.textContent = '导入失败';
-                    statusEl.className = 'data-source-status status-error';
-                    this.showError('导入失败: ' + error);
+                    console.error('添加数据源失败:', error);
+                    // 隐藏进度提示
+                    this.hideProgress();
+                    this.showError('添加数据源失败: ' + error);
                 }
+            } else {
+                console.log('用户取消了文件选择');
             }
         } catch (error) {
             console.error('选择文件失败:', error);
             this.showError('选择文件失败: ' + error);
+        }
+    }
+    
+    showImportProgress() {
+        const progressContainer = document.getElementById('importProgress');
+        const progressBar = document.getElementById('progressBar');
+        const progressText = document.getElementById('progressText');
+        
+        if (progressContainer && progressBar && progressText) {
+            progressContainer.style.display = 'block';
+            progressBar.style.width = '0%';
+            progressText.textContent = '正在导入数据源，请稍候...';
         }
     }
     
@@ -323,3 +479,4 @@ export class HomePage {
         }, 2500);
     }
 }
+

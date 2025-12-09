@@ -24,12 +24,21 @@ struct DataCache {
     customer_data_map: std::collections::HashMap<String, CustomerData>,
 }
 
-/// 数据源配置
-#[derive(Debug, Serialize, Deserialize)]
+/// 单个数据源配置
+#[derive(Debug, Serialize, Deserialize, Clone)]
 struct DataSourceConfig {
+    id: String,
     file_path: String,
     file_name: String,
     loaded_at: String,
+    total_rows: usize,
+}
+
+/// 数据源列表配置
+#[derive(Debug, Serialize, Deserialize)]
+struct DataSourceListConfig {
+    data_sources: Vec<DataSourceConfig>,
+    current_id: Option<String>,
 }
 
 /// 加载选项的返回结果
@@ -46,13 +55,21 @@ struct LoadOptionsResult {
     load_time_ms: u128,
 }
 
-/// 数据源信息
-#[derive(Debug, Serialize, Deserialize)]
+/// 数据源信息（单个）
+#[derive(Debug, Serialize, Deserialize, Clone)]
 struct DataSourceInfo {
+    id: String,
     file_path: String,
     file_name: String,
     loaded_at: String,
     total_rows: usize,
+}
+
+/// 数据源列表信息
+#[derive(Debug, Serialize, Deserialize)]
+struct DataSourceListInfo {
+    data_sources: Vec<DataSourceInfo>,
+    current_id: Option<String>,
 }
 
 /// 获取配置文件路径
@@ -69,22 +86,77 @@ fn get_config_path(_app: &AppHandle) -> PathBuf {
     app_data_dir.join("data_source.json")
 }
 
-/// 保存数据源配置
-fn save_data_source_config(app: &AppHandle, file_path: &str) -> Result<(), String> {
+/// 读取数据源列表配置
+fn load_data_source_list_config(app: &AppHandle) -> Result<DataSourceListConfig, String> {
     let config_path = get_config_path(app);
-    let file_name = std::path::Path::new(file_path)
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("未知文件")
-        .to_string();
     
-    let config = DataSourceConfig {
-        file_path: file_path.to_string(),
-        file_name,
-        loaded_at: chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
-    };
+    if !config_path.exists() {
+        return Ok(DataSourceListConfig {
+            data_sources: Vec::new(),
+            current_id: None,
+        });
+    }
     
-    let json = serde_json::to_string_pretty(&config)
+    let content = fs::read_to_string(&config_path)
+        .map_err(|e| format!("读取配置失败: {}", e))?;
+    
+    // 尝试解析为新格式
+    match serde_json::from_str::<DataSourceListConfig>(&content) {
+        Ok(mut config) => {
+            // 过滤掉文件不存在的数据源
+            config.data_sources.retain(|ds| std::path::Path::new(&ds.file_path).exists());
+            Ok(config)
+        },
+        Err(_) => {
+            // 尝试解析为旧格式（单个数据源）
+            match serde_json::from_str::<serde_json::Value>(&content) {
+                Ok(old_value) => {
+                    if let (Some(file_path), Some(file_name)) = (
+                        old_value.get("file_path").and_then(|v| v.as_str()),
+                        old_value.get("file_name").and_then(|v| v.as_str()),
+                    ) {
+                        if std::path::Path::new(file_path).exists() {
+                            let id = uuid::Uuid::new_v4().to_string();
+                            Ok(DataSourceListConfig {
+                                data_sources: vec![DataSourceConfig {
+                                    id: id.clone(),
+                                    file_path: file_path.to_string(),
+                                    file_name: file_name.to_string(),
+                                    loaded_at: old_value.get("loaded_at")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("")
+                                        .to_string(),
+                                    total_rows: 0,
+                                }],
+                                current_id: Some(id),
+                            })
+                        } else {
+                            Ok(DataSourceListConfig {
+                                data_sources: Vec::new(),
+                                current_id: None,
+                            })
+                        }
+                    } else {
+                        Ok(DataSourceListConfig {
+                            data_sources: Vec::new(),
+                            current_id: None,
+                        })
+                    }
+                },
+                Err(_) => Ok(DataSourceListConfig {
+                    data_sources: Vec::new(),
+                    current_id: None,
+                }),
+            }
+        },
+    }
+}
+
+/// 保存数据源列表配置
+fn save_data_source_list_config(app: &AppHandle, config: &DataSourceListConfig) -> Result<(), String> {
+    let config_path = get_config_path(app);
+    
+    let json = serde_json::to_string_pretty(config)
         .map_err(|e| format!("序列化配置失败: {}", e))?;
     
     fs::write(&config_path, json)
@@ -93,31 +165,9 @@ fn save_data_source_config(app: &AppHandle, file_path: &str) -> Result<(), Strin
     Ok(())
 }
 
-/// 读取数据源配置
-fn load_data_source_config(app: &AppHandle) -> Result<Option<DataSourceConfig>, String> {
-    let config_path = get_config_path(app);
-    
-    if !config_path.exists() {
-        return Ok(None);
-    }
-    
-    let content = fs::read_to_string(&config_path)
-        .map_err(|e| format!("读取配置失败: {}", e))?;
-    
-    let config: DataSourceConfig = serde_json::from_str(&content)
-        .map_err(|e| format!("解析配置失败: {}", e))?;
-    
-    // 检查文件是否还存在
-    if !std::path::Path::new(&config.file_path).exists() {
-        return Ok(None);
-    }
-    
-    Ok(Some(config))
-}
-
-/// 设置数据源（从首页导入）
+/// 添加数据源（从首页导入）
 #[tauri::command]
-async fn set_data_source(
+async fn add_data_source(
     file_path: String,
     state: State<'_, AppState>,
     app: AppHandle,
@@ -127,8 +177,11 @@ async fn set_data_source(
         *flag = false;
     }
 
-    // 保存配置
-    save_data_source_config(&app, &file_path)?;
+    // 检查文件是否已存在
+    let mut config = load_data_source_list_config(&app)?;
+    if config.data_sources.iter().any(|ds| ds.file_path == file_path) {
+        return Err("该文件已经添加为数据源".to_string());
+    }
 
     // 加载并缓存数据
     let cancel_flag = state.cancel_flag.clone();
@@ -195,6 +248,22 @@ async fn set_data_source(
         .unwrap_or("未知文件")
         .to_string();
 
+    // 添加到数据源列表
+    let id = uuid::Uuid::new_v4().to_string();
+    config.data_sources.push(DataSourceConfig {
+        id: id.clone(),
+        file_path: result.file_path.clone(),
+        file_name: file_name.clone(),
+        loaded_at: chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+        total_rows: result.total_rows,
+    });
+    
+    // 设置为当前数据源
+    config.current_id = Some(id.clone());
+    
+    // 保存配置
+    save_data_source_list_config(&app, &config)?;
+
     Ok(LoadOptionsResult {
         file_path: result.file_path,
         file_name,
@@ -208,37 +277,282 @@ async fn set_data_source(
     })
 }
 
-/// 获取当前数据源信息
+/// 设置数据源（兼容旧接口）
+#[tauri::command]
+async fn set_data_source(
+    file_path: String,
+    state: State<'_, AppState>,
+    app: AppHandle,
+) -> Result<LoadOptionsResult, String> {
+    add_data_source(file_path, state, app).await
+}
+
+/// 获取数据源列表信息
+#[tauri::command]
+async fn get_data_source_list_info(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<DataSourceListInfo, String> {
+    let config = load_data_source_list_config(&app)?;
+    
+    // 检查缓存，更新total_rows
+    let cache = state.data_cache.lock().unwrap();
+    let cached_file_path = cache.as_ref().map(|c| &c.file_path);
+    
+    let data_sources: Vec<DataSourceInfo> = config.data_sources
+        .into_iter()
+        .map(|ds| {
+            let total_rows = if cached_file_path == Some(&ds.file_path) {
+                cache.as_ref().map(|c| c.cached_rows.len()).unwrap_or(ds.total_rows)
+            } else {
+                ds.total_rows
+            };
+            
+            DataSourceInfo {
+                id: ds.id,
+                file_path: ds.file_path,
+                file_name: ds.file_name,
+                loaded_at: ds.loaded_at,
+                total_rows,
+            }
+        })
+        .collect();
+    
+    Ok(DataSourceListInfo {
+        data_sources,
+        current_id: config.current_id,
+    })
+}
+
+/// 获取当前数据源信息（兼容旧接口）
 #[tauri::command]
 async fn get_data_source_info(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<Option<DataSourceInfo>, String> {
-    // 先尝试从配置读取
-    if let Some(config) = load_data_source_config(&app)? {
-        // 检查缓存是否存在
-        let cache = state.data_cache.lock().unwrap();
-        if let Some(ref data_cache) = *cache {
-            if data_cache.file_path == config.file_path {
-                return Ok(Some(DataSourceInfo {
-                    file_path: config.file_path.clone(),
-                    file_name: config.file_name.clone(),
-                    loaded_at: config.loaded_at,
-                    total_rows: data_cache.cached_rows.len(),
-                }));
-            }
+    let list_info = get_data_source_list_info(app, state).await?;
+    
+    if let Some(current_id) = list_info.current_id {
+        if let Some(current_ds) = list_info.data_sources.iter().find(|ds| ds.id == current_id) {
+            return Ok(Some(current_ds.clone()));
         }
-        
-        // 如果缓存不存在但配置存在，尝试加载
-        return Ok(Some(DataSourceInfo {
-            file_path: config.file_path.clone(),
-            file_name: config.file_name.clone(),
-            loaded_at: config.loaded_at,
-            total_rows: 0, // 需要重新加载
-        }));
+    }
+    
+    // 如果没有当前数据源，返回第一个
+    if let Some(first_ds) = list_info.data_sources.first() {
+        return Ok(Some(first_ds.clone()));
     }
     
     Ok(None)
+}
+
+/// 删除数据源
+#[tauri::command]
+async fn delete_data_source(
+    data_source_id: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let mut config = load_data_source_list_config(&app)?;
+    
+    // 检查是否是当前数据源
+    let is_current = config.current_id.as_ref() == Some(&data_source_id);
+    
+    // 删除数据源
+    config.data_sources.retain(|ds| ds.id != data_source_id);
+    
+    // 如果删除的是当前数据源，切换到第一个（如果有）
+    if is_current {
+        config.current_id = config.data_sources.first().map(|ds| ds.id.clone());
+        
+        // 如果还有数据源，加载新的当前数据源
+        if let Some(new_current_id) = &config.current_id {
+            // 加载新数据源
+            let _ = load_data_source_by_id(new_current_id.clone(), state, app.clone()).await;
+        } else {
+            // 没有数据源了，清空缓存
+            let mut cache = state.data_cache.lock().unwrap();
+            *cache = None;
+        }
+    }
+    
+    save_data_source_list_config(&app, &config)?;
+    Ok(())
+}
+
+/// 切换数据源
+#[tauri::command]
+async fn switch_data_source(
+    data_source_id: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<LoadOptionsResult, String> {
+    load_data_source_by_id(data_source_id, state, app).await
+}
+
+/// 根据ID加载数据源
+async fn load_data_source_by_id(
+    data_source_id: String,
+    state: State<'_, AppState>,
+    app: AppHandle,
+) -> Result<LoadOptionsResult, String> {
+    let config = load_data_source_list_config(&app)?;
+    
+    let data_source = config.data_sources
+        .iter()
+        .find(|ds| ds.id == data_source_id)
+        .ok_or("数据源不存在")?;
+    
+    // 检查缓存是否已经是这个数据源
+    {
+        let cache = state.data_cache.lock().unwrap();
+        if let Some(ref data_cache) = *cache {
+            if data_cache.file_path == data_source.file_path {
+                // 已经是当前数据源，直接返回
+                let mut customers_map: std::collections::HashMap<String, String> = 
+                    std::collections::HashMap::new();
+                let mut provinces_set: std::collections::HashSet<String> = 
+                    std::collections::HashSet::new();
+                let mut cities_set: std::collections::HashSet<String> = 
+                    std::collections::HashSet::new();
+                let mut districts_set: std::collections::HashSet<String> = 
+                    std::collections::HashSet::new();
+                let mut regions_set: std::collections::HashSet<String> = 
+                    std::collections::HashSet::new();
+
+                for row in &data_cache.cached_rows {
+                    if !row.customer_code.is_empty() {
+                        customers_map.insert(row.customer_code.clone(), row.customer_name.clone());
+                    }
+                    if let Some(ref p) = row.province {
+                        if !p.is_empty() { provinces_set.insert(p.clone()); }
+                    }
+                    if let Some(ref c) = row.city {
+                        if !c.is_empty() { cities_set.insert(c.clone()); }
+                    }
+                    if let Some(ref d) = row.district {
+                        if !d.is_empty() { districts_set.insert(d.clone()); }
+                    }
+                    if let Some(ref r) = row.region {
+                        if !r.is_empty() { regions_set.insert(r.clone()); }
+                    }
+                }
+
+                let available_customers: Vec<CustomerOption> = customers_map
+                    .into_iter()
+                    .map(|(code, name)| CustomerOption { code, name })
+                    .collect();
+
+                let mut available_provinces: Vec<String> = provinces_set.into_iter().collect();
+                available_provinces.sort();
+                let mut available_cities: Vec<String> = cities_set.into_iter().collect();
+                available_cities.sort();
+                let mut available_districts: Vec<String> = districts_set.into_iter().collect();
+                available_districts.sort();
+                let mut available_regions: Vec<String> = regions_set.into_iter().collect();
+                available_regions.sort();
+
+                return Ok(LoadOptionsResult {
+                    file_path: data_source.file_path.clone(),
+                    file_name: data_source.file_name.clone(),
+                    available_customers,
+                    available_provinces,
+                    available_cities,
+                    available_districts,
+                    available_regions,
+                    total_rows: data_cache.cached_rows.len(),
+                    load_time_ms: 0,
+                });
+            }
+        }
+    }
+    
+    // 需要加载数据源
+    {
+        let mut flag = state.cancel_flag.lock().unwrap();
+        *flag = false;
+    }
+
+    let cancel_flag = state.cancel_flag.clone();
+    let app_handle = app.clone();
+    let data_cache = state.data_cache.clone();
+
+    let progress_callback = move |progress: monthly_analysis::ProcessProgress| {
+        let _ = app_handle.emit("excel-progress", ProcessProgress {
+            step: progress.step,
+            message: progress.message,
+            percent: progress.percent,
+            detail: progress.detail,
+        });
+    };
+
+    let result = tokio::task::spawn_blocking({
+        let file_path = data_source.file_path.clone();
+        move || {
+            monthly_analysis::load_excel_file(&file_path, cancel_flag, progress_callback)
+        }
+    })
+    .await
+    .map_err(|e| format!("任务执行失败: {}", e))??;
+
+    // 构建客户数据映射
+    let mut customer_data_map: std::collections::HashMap<String, CustomerData> = 
+        std::collections::HashMap::new();
+    
+    for row in &result.cached_rows {
+        customer_data_map
+            .entry(row.customer_code.clone())
+            .and_modify(|existing| {
+                existing.pay_amount += row.pay_amount;
+                existing.recharge_deduction += row.recharge_deduction;
+                existing.total_amount += row.total_amount;
+                existing.order_count += 1;
+                if existing.customer_name.is_empty() && !row.customer_name.is_empty() {
+                    existing.customer_name = row.customer_name.clone();
+                }
+            })
+            .or_insert_with(|| CustomerData {
+                customer_code: row.customer_code.clone(),
+                customer_name: row.customer_name.clone(),
+                pay_amount: row.pay_amount,
+                recharge_deduction: row.recharge_deduction,
+                total_amount: row.total_amount,
+                order_count: 1,
+            });
+    }
+
+    // 更新缓存
+    {
+        let mut cache = data_cache.lock().unwrap();
+        *cache = Some(DataCache {
+            file_path: result.file_path.clone(),
+            cached_rows: result.cached_rows.clone(),
+            customer_data_map,
+        });
+    }
+
+    // 更新配置中的当前数据源
+    let mut config = load_data_source_list_config(&app)?;
+    config.current_id = Some(data_source_id);
+    save_data_source_list_config(&app, &config)?;
+
+    let file_name = std::path::Path::new(&result.file_path)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("未知文件")
+        .to_string();
+
+    Ok(LoadOptionsResult {
+        file_path: result.file_path,
+        file_name,
+        available_customers: result.available_customers,
+        available_provinces: result.available_provinces,
+        available_cities: result.available_cities,
+        available_districts: result.available_districts,
+        available_regions: result.available_regions,
+        total_rows: result.total_rows,
+        load_time_ms: result.load_time_ms,
+    })
 }
 
 /// 自动加载数据源（如果存在）
@@ -247,16 +561,30 @@ async fn auto_load_data_source(
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<Option<LoadOptionsResult>, String> {
-    let config = match load_data_source_config(&app)? {
-        Some(c) => c,
-        None => return Ok(None),
+    let config = load_data_source_list_config(&app)?;
+    
+    let current_id = match config.current_id {
+        Some(id) => id,
+        None => {
+            // 如果没有当前数据源，尝试使用第一个
+            if let Some(first_ds) = config.data_sources.first() {
+                first_ds.id.clone()
+            } else {
+                return Ok(None);
+            }
+        },
     };
+    
+    let current_ds = config.data_sources
+        .iter()
+        .find(|ds| ds.id == current_id)
+        .ok_or("当前数据源不存在")?;
 
     // 如果缓存已存在且文件路径匹配，直接返回
     {
         let cache = state.data_cache.lock().unwrap();
         if let Some(ref data_cache) = *cache {
-            if data_cache.file_path == config.file_path {
+            if data_cache.file_path == current_ds.file_path {
                 // 从缓存构建返回结果
                 let mut customers_map: std::collections::HashMap<String, String> = 
                     std::collections::HashMap::new();
@@ -302,8 +630,8 @@ async fn auto_load_data_source(
                 available_regions.sort();
 
                 return Ok(Some(LoadOptionsResult {
-                    file_path: config.file_path.clone(),
-                    file_name: config.file_name.clone(),
+                    file_path: current_ds.file_path.clone(),
+                    file_name: current_ds.file_name.clone(),
                     available_customers,
                     available_provinces,
                     available_cities,
@@ -317,7 +645,7 @@ async fn auto_load_data_source(
     }
 
     // 缓存不存在，需要重新加载
-    let result = set_data_source(config.file_path.clone(), state, app).await?;
+    let result = load_data_source_by_id(current_id, state, app).await?;
     Ok(Some(result))
 }
 
@@ -538,7 +866,11 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             analyze_excel,
             set_data_source,
+            add_data_source,
             get_data_source_info,
+            get_data_source_list_info,
+            delete_data_source,
+            switch_data_source,
             auto_load_data_source,
             analyze_top20_cached,
             load_monthly_file,
