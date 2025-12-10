@@ -73,6 +73,16 @@ export class HomePage {
                         <span class="feature-badge new">✨ 新功能</span>
                     </div>
                     
+                    <div class="feature-card slide-up" data-feature="purchase">
+                        <div class="feature-icon purple">💰</div>
+                        <h3 class="feature-title">客户采购额计算</h3>
+                        <p class="feature-desc">
+                            导入客户编码表，自动匹配数据源中的客户数据，按月份统计每个客户的采购金额，
+                            支持多数据源合并分析，生成详细的月度采购报表
+                        </p>
+                        <span class="feature-badge new">✨ 新功能</span>
+                    </div>
+                    
                     <div class="feature-card slide-up" data-feature="coming">
                         <div class="feature-icon cyan">🗂️</div>
                         <h3 class="feature-title">客户账务分类</h3>
@@ -297,6 +307,8 @@ export class HomePage {
                     window.location.hash = 'monthly';
                 } else if (feature === 'rebate') {
                     window.location.hash = 'rebate';
+                } else if (feature === 'purchase') {
+                    window.location.hash = 'purchase';
                 } else if (feature === 'coming') {
                     this.showToast('该功能正在开发中，敬请期待！');
                 }

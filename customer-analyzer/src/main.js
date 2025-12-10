@@ -3,6 +3,7 @@ import { HomePage } from './pages/home.js';
 import { Top20Page } from './pages/top20.js';
 import { MonthlyPage } from './pages/monthly.js';
 import { RebatePage } from './pages/rebate.js';
+import { PurchasePage } from './pages/purchase.js';
 
 class App {
     constructor() {
@@ -11,7 +12,8 @@ class App {
             home: new HomePage(this),
             top20: new Top20Page(this),
             monthly: new MonthlyPage(this),
-            rebate: new RebatePage(this)
+            rebate: new RebatePage(this),
+            purchase: new PurchasePage(this)
         };
         
         this.init();
@@ -45,6 +47,7 @@ class App {
                     <a class="nav-link" data-page="top20">前20大客户</a>
                     <a class="nav-link" data-page="monthly">月度分析</a>
                     <a class="nav-link" data-page="rebate">返利分析</a>
+                    <a class="nav-link" data-page="purchase">采购额计算</a>
                 </div>
             </nav>
             <main id="page-content"></main>

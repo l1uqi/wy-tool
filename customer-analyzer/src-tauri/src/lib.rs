@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::fs;
 use std::env;
+use calamine::Data;
 
 // 全局状态
 struct AppState {
@@ -1234,6 +1235,223 @@ async fn get_order_details(
     Ok(result)
 }
 
+/// 客户采购额月度数据
+#[derive(Debug, Serialize, Deserialize)]
+struct CustomerMonthlyPurchase {
+    month: String,
+    total_amount: f64,
+}
+
+/// 客户采购额数据
+#[derive(Debug, Serialize, Deserialize)]
+struct CustomerPurchaseData {
+    customer_code: String,
+    customer_name: String,
+    monthly_data: Vec<CustomerMonthlyPurchase>,
+    total_amount: f64,
+}
+
+/// 客户采购额计算结果
+#[derive(Debug, Serialize, Deserialize)]
+struct CustomerPurchaseResult {
+    customer_data: Vec<CustomerPurchaseData>,
+    total_customers: usize,
+    total_amount: f64,
+}
+
+/// 加载客户编码Excel文件（返回完整数据）
+#[tauri::command]
+async fn load_customer_codes(
+    file_path: String,
+) -> Result<serde_json::Value, String> {
+    use calamine::{open_workbook, Reader, Xlsx, Xls, Data};
+    use std::path::Path;
+    
+    let path = Path::new(&file_path);
+    let extension = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+    
+    let mut customer_codes: Vec<String> = Vec::new();
+    
+    let rows: Vec<Vec<Data>> = match extension.as_str() {
+        "xlsx" => {
+            let mut workbook: Xlsx<_> = open_workbook(&file_path)
+                .map_err(|e| format!("无法打开Excel文件: {}", e))?;
+            
+            let sheet_name = workbook.sheet_names().first()
+                .ok_or("Excel文件没有工作表")?.clone();
+            
+            let range = workbook.worksheet_range(&sheet_name)
+                .map_err(|e| format!("无法读取工作表: {}", e))?;
+            
+            range.rows().map(|r| r.to_vec()).collect()
+        },
+        "xls" => {
+            let mut workbook: Xls<_> = open_workbook(&file_path)
+                .map_err(|e| format!("无法打开Excel文件: {}", e))?;
+            
+            let sheet_name = workbook.sheet_names().first()
+                .ok_or("Excel文件没有工作表")?.clone();
+            
+            let range = workbook.worksheet_range(&sheet_name)
+                .map_err(|e| format!("无法读取工作表: {}", e))?;
+            
+            range.rows().map(|r| r.to_vec()).collect()
+        },
+        _ => return Err(format!("不支持的文件格式: {}", extension)),
+    };
+    
+    if rows.is_empty() {
+        return Err("Excel文件为空".to_string());
+    }
+    
+    // 查找客户编码列索引
+    let header = &rows[0];
+    let mut customer_code_idx = None;
+    
+    for (idx, cell) in header.iter().enumerate() {
+        let col_name = purchase_data_to_string(cell).trim().to_string();
+        if col_name == "客户编码" || col_name == "客户代码" || col_name == "编码" {
+            customer_code_idx = Some(idx);
+            break;
+        }
+    }
+    
+    let customer_code_idx = customer_code_idx.ok_or("未找到'客户编码'列")?;
+    
+    // 提取客户编码和完整行数据
+    let mut excel_rows: Vec<Vec<String>> = Vec::new();
+    for row in rows.iter().skip(1) {
+        if let Some(cell) = row.get(customer_code_idx) {
+            let code = purchase_data_to_string(cell).trim().to_string();
+            if !code.is_empty() {
+                customer_codes.push(code.clone());
+                // 保存完整的行数据（转换为字符串）
+                let row_data: Vec<String> = row.iter().map(|d| purchase_data_to_string(d)).collect();
+                excel_rows.push(row_data);
+            }
+        }
+    }
+    
+    // 转换表头
+    let headers: Vec<String> = header.iter().map(|d| purchase_data_to_string(d)).collect();
+    
+    Ok(serde_json::json!({
+        "customer_codes": customer_codes,
+        "headers": headers,
+        "rows": excel_rows,
+        "customer_code_index": customer_code_idx
+    }))
+}
+
+fn purchase_data_to_string(value: &calamine::Data) -> String {
+    match value {
+        Data::Int(i) => i.to_string(),
+        Data::Float(f) => f.to_string(),
+        Data::String(s) => s.clone(),
+        Data::Bool(b) => b.to_string(),
+        Data::DateTime(dt) => dt.to_string(),
+        Data::DateTimeIso(s) => s.clone(),
+        Data::DurationIso(s) => s.clone(),
+        Data::Error(e) => format!("{:?}", e),
+        Data::Empty => String::new(),
+    }
+}
+
+/// 计算客户采购额
+#[tauri::command]
+async fn calculate_customer_purchase(
+    data_source_ids: Vec<String>,
+    customer_codes: Vec<String>,
+    app: AppHandle,
+) -> Result<CustomerPurchaseResult, String> {
+    // 合并多个数据源的缓存
+    let merged_cache = merge_data_caches(data_source_ids, &app)?;
+    
+    let result = tokio::task::spawn_blocking(move || -> Result<CustomerPurchaseResult, String> {
+        // 创建客户编码集合用于快速查找
+        let customer_code_set: std::collections::HashSet<String> = 
+            customer_codes.iter().cloned().collect();
+        
+        // 按客户编码和月份分组统计
+        let mut customer_map: std::collections::HashMap<String, CustomerPurchaseData> = 
+            std::collections::HashMap::new();
+        
+        for row in &merged_cache.cached_rows {
+            // 只处理在客户编码列表中的客户
+            if !customer_code_set.contains(&row.customer_code) {
+                continue;
+            }
+            
+            let month = row.month.clone().unwrap_or_else(|| "未知月份".to_string());
+            
+            customer_map
+                .entry(row.customer_code.clone())
+                .and_modify(|data| {
+                    // 查找或创建该月份的记录
+                    let monthly_entry = data.monthly_data
+                        .iter_mut()
+                        .find(|m| m.month == month);
+                    
+                    if let Some(entry) = monthly_entry {
+                        entry.total_amount += row.total_amount;
+                    } else {
+                        data.monthly_data.push(CustomerMonthlyPurchase {
+                            month: month.clone(),
+                            total_amount: row.total_amount,
+                        });
+                    }
+                    
+                    data.total_amount += row.total_amount;
+                    
+                    // 更新客户名称（如果为空）
+                    if data.customer_name.is_empty() && !row.customer_name.is_empty() {
+                        data.customer_name = row.customer_name.clone();
+                    }
+                })
+                .or_insert_with(|| {
+                    let mut monthly_data = Vec::new();
+                    monthly_data.push(CustomerMonthlyPurchase {
+                        month: month.clone(),
+                        total_amount: row.total_amount,
+                    });
+                    
+                    CustomerPurchaseData {
+                        customer_code: row.customer_code.clone(),
+                        customer_name: row.customer_name.clone(),
+                        monthly_data,
+                        total_amount: row.total_amount,
+                    }
+                });
+        }
+        
+        // 转换为Vec并排序
+        let mut customer_data: Vec<CustomerPurchaseData> = customer_map.into_values().collect();
+        customer_data.sort_by(|a, b| a.customer_code.cmp(&b.customer_code));
+        
+        // 对每个客户的月度数据按月份排序
+        for customer in &mut customer_data {
+            customer.monthly_data.sort_by(|a, b| a.month.cmp(&b.month));
+        }
+        
+        let total_customers = customer_data.len();
+        let total_amount: f64 = customer_data.iter().map(|c| c.total_amount).sum();
+        
+        Ok(CustomerPurchaseResult {
+            customer_data,
+            total_customers,
+            total_amount,
+        })
+    })
+    .await
+    .map_err(|e| format!("任务执行失败: {}", e))??;
+
+    Ok(result)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -1263,7 +1481,9 @@ pub fn run() {
             cancel_analysis,
             save_export_file,
             save_excel_file,
-            get_order_details
+            get_order_details,
+            load_customer_codes,
+            calculate_customer_purchase
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

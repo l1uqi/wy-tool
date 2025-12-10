@@ -54,7 +54,7 @@ export class MonthlyPage {
                             <li><strong>客户编码</strong> - 用于识别唯一客户（必需）</li>
                             <li><strong>支付金额</strong> - 支付金额数值（必需）</li>
                             <li><strong>充值抵扣</strong> - 充值抵扣金额（必需）</li>
-                            <li><strong>日期/下单日期</strong> - 用于按月汇总（推荐）</li>
+                            <li><strong>日期/下单日期/出库时间</strong> - 用于按月汇总（必需，支持：日期、订单日期、下单日期、出库时间、出库日期、发货时间等）</li>
                             <li><strong>省/市/区</strong> - 地区信息（可选）</li>
                         </ul>
                     </div>
@@ -86,9 +86,10 @@ export class MonthlyPage {
                         <div class="filter-row" id="targetFilterRow">
                             <div class="filter-item">
                                 <label id="targetLabel">🎯 选择客户：</label>
-                                <select id="targetSelect" class="select-input">
-                                    <option value="">-- 请选择 --</option>
-                                </select>
+                                <div class="target-input-wrapper">
+                                    <input type="text" id="targetInput" class="select-input" placeholder="输入关键词搜索或选择..." autocomplete="off">
+                                    <div class="target-dropdown" id="targetDropdown" style="display: none;"></div>
+                                </div>
                             </div>
                         </div>
                         
@@ -333,6 +334,47 @@ export class MonthlyPage {
                     color: var(--text-muted);
                     font-size: 0.85rem;
                 }
+                
+                .target-input-wrapper {
+                    position: relative;
+                    width: 100%;
+                    max-width: 400px;
+                }
+                
+                .target-dropdown {
+                    position: absolute;
+                    top: 100%;
+                    left: 0;
+                    right: 0;
+                    max-height: 300px;
+                    overflow-y: auto;
+                    background: var(--bg-card);
+                    border: 1px solid var(--border-color);
+                    border-radius: 8px;
+                    box-shadow: var(--shadow-lg);
+                    z-index: 1000;
+                    margin-top: 4px;
+                }
+                
+                .dropdown-item {
+                    padding: 12px 16px;
+                    cursor: pointer;
+                    color: var(--text-primary);
+                    transition: background 0.2s;
+                    border-bottom: 1px solid var(--border-color);
+                }
+                
+                .dropdown-item:last-child {
+                    border-bottom: none;
+                }
+                
+                .dropdown-item:hover {
+                    background: rgba(59, 130, 246, 0.1);
+                }
+                
+                .dropdown-item:active {
+                    background: rgba(59, 130, 246, 0.2);
+                }
             </style>
         `;
         
@@ -492,7 +534,6 @@ export class MonthlyPage {
         const exportDetailsBtn = container.querySelector('#exportDetailsBtn');
         const analyzeBtn = container.querySelector('#analyzeBtn');
         const optionTabs = container.querySelectorAll('.option-tab');
-        const targetSelect = container.querySelector('#targetSelect');
         
         if (goToHomeBtn) {
             goToHomeBtn.addEventListener('click', () => {
@@ -516,10 +557,6 @@ export class MonthlyPage {
             analyzeBtn.addEventListener('click', () => this.runAnalysis());
         }
         
-        if (targetSelect) {
-            targetSelect.addEventListener('change', () => this.updateAnalyzeButton());
-        }
-        
         optionTabs.forEach(tab => {
             tab.addEventListener('click', () => {
                 if (tab.classList.contains('disabled')) return;
@@ -532,14 +569,35 @@ export class MonthlyPage {
     }
     
     updateAnalyzeButton() {
-        const targetSelect = document.getElementById('targetSelect');
+        const targetInput = document.getElementById('targetInput');
         const analyzeBtn = document.getElementById('analyzeBtn');
-        analyzeBtn.disabled = !targetSelect?.value;
+        analyzeBtn.disabled = !targetInput?.value || targetInput.value.trim() === '';
+    }
+    
+    // 格式化月份：将 "2024-01" 转换为 "2024年1月"
+    formatMonth(monthStr) {
+        if (!monthStr) return '未知月份';
+        // 如果已经是中文格式，直接返回
+        if (monthStr.includes('月')) return monthStr;
+        
+        // 如果是"未知月份"，返回原样
+        if (monthStr === '未知月份') return monthStr;
+        
+        // 解析 "2024-01" 格式
+        const match = monthStr.match(/^(\d{4})-(\d{1,2})$/);
+        if (match) {
+            const year = match[1];
+            const month = parseInt(match[2], 10);
+            return `${year}年${month}月`;
+        }
+        
+        return monthStr;
     }
     
     updateTargetSelect() {
-        const targetSelect = document.getElementById('targetSelect');
+        const targetInput = document.getElementById('targetInput');
         const targetLabel = document.getElementById('targetLabel');
+        const targetDropdown = document.getElementById('targetDropdown');
         
         if (!this.fileOptions) return;
         
@@ -558,32 +616,126 @@ export class MonthlyPage {
             case 'customer':
                 options = this.fileOptions.available_customers.map(c => ({
                     value: c.code,
-                    text: `${c.code} - ${c.name || '未知'}`
+                    text: `${c.code} - ${c.name || '未知'}`,
+                    searchText: `${c.code} ${c.name || ''}`.toLowerCase()
                 }));
                 break;
             case 'province':
-                options = this.fileOptions.available_provinces.map(p => ({ value: p, text: p }));
+                options = this.fileOptions.available_provinces.map(p => ({ 
+                    value: p, 
+                    text: p,
+                    searchText: p.toLowerCase()
+                }));
                 break;
             case 'city':
-                options = this.fileOptions.available_cities.map(c => ({ value: c, text: c }));
+                options = this.fileOptions.available_cities.map(c => ({ 
+                    value: c, 
+                    text: c,
+                    searchText: c.toLowerCase()
+                }));
                 break;
             case 'district':
-                options = this.fileOptions.available_districts.map(d => ({ value: d, text: d }));
+                options = this.fileOptions.available_districts.map(d => ({ 
+                    value: d, 
+                    text: d,
+                    searchText: d.toLowerCase()
+                }));
                 break;
             case 'region':
-                options = this.fileOptions.available_regions.map(r => ({ value: r, text: r }));
+                options = this.fileOptions.available_regions.map(r => ({ 
+                    value: r, 
+                    text: r,
+                    searchText: r.toLowerCase()
+                }));
                 break;
         }
         
-        targetSelect.innerHTML = '<option value="">-- 请选择 --</option>';
-        options.forEach(opt => {
-            const option = document.createElement('option');
-            option.value = opt.value;
-            option.textContent = opt.text;
-            targetSelect.appendChild(option);
-        });
+        // 保存选项供搜索使用
+        this.currentOptions = options;
+        
+        // 清空输入框
+        if (targetInput) {
+            targetInput.value = '';
+            targetInput.placeholder = '输入关键词搜索或选择...';
+        }
+        
+        // 绑定输入事件
+        if (targetInput && !targetInput.hasAttribute('data-bound')) {
+            targetInput.setAttribute('data-bound', 'true');
+            targetInput.addEventListener('input', (e) => this.handleTargetInput(e));
+            targetInput.addEventListener('focus', () => this.showDropdown());
+            targetInput.addEventListener('blur', () => {
+                // 延迟隐藏，以便点击选项时能触发
+                setTimeout(() => this.hideDropdown(), 200);
+            });
+        }
         
         this.updateAnalyzeButton();
+    }
+    
+    handleTargetInput(e) {
+        const query = e.target.value.trim().toLowerCase();
+        const dropdown = document.getElementById('targetDropdown');
+        
+        if (!query) {
+            this.showDropdown();
+            return;
+        }
+        
+        // 过滤选项
+        const filtered = this.currentOptions.filter(opt => 
+            opt.searchText.includes(query)
+        );
+        
+        this.renderDropdown(filtered);
+    }
+    
+    showDropdown() {
+        const dropdown = document.getElementById('targetDropdown');
+        if (!this.currentOptions || this.currentOptions.length === 0) return;
+        
+        // 如果有输入，显示过滤后的；否则显示全部
+        const query = document.getElementById('targetInput')?.value.trim().toLowerCase() || '';
+        const filtered = query 
+            ? this.currentOptions.filter(opt => opt.searchText.includes(query))
+            : this.currentOptions;
+        
+        this.renderDropdown(filtered);
+    }
+    
+    hideDropdown() {
+        const dropdown = document.getElementById('targetDropdown');
+        if (dropdown) {
+            dropdown.style.display = 'none';
+        }
+    }
+    
+    renderDropdown(options) {
+        const dropdown = document.getElementById('targetDropdown');
+        if (!dropdown) return;
+        
+        if (options.length === 0) {
+            dropdown.innerHTML = '<div class="dropdown-item">无匹配结果</div>';
+            dropdown.style.display = 'block';
+            return;
+        }
+        
+        dropdown.innerHTML = options.map(opt => 
+            `<div class="dropdown-item" data-value="${this.escapeHtml(opt.value)}">${this.escapeHtml(opt.text)}</div>`
+        ).join('');
+        
+        // 绑定点击事件
+        dropdown.querySelectorAll('.dropdown-item').forEach(item => {
+            item.addEventListener('click', (e) => {
+                const value = e.target.dataset.value;
+                const text = e.target.textContent;
+                document.getElementById('targetInput').value = text;
+                this.hideDropdown();
+                this.updateAnalyzeButton();
+            });
+        });
+        
+        dropdown.style.display = 'block';
     }
     
     
@@ -618,12 +770,21 @@ export class MonthlyPage {
             return;
         }
         
-        const targetSelect = document.getElementById('targetSelect');
-        const target = targetSelect?.value || '';
+        const targetInput = document.getElementById('targetInput');
+        const targetValue = targetInput?.value || '';
         
-        if (!target) {
-            this.showError('请选择分析目标');
+        if (!targetValue || targetValue.trim() === '') {
+            this.showError('请输入或选择分析目标');
             return;
+        }
+        
+        // 从输入值中提取实际的值（如果是"编码 - 名称"格式，提取编码）
+        let target = targetValue;
+        if (this.currentDimension === 'customer') {
+            const match = targetValue.match(/^([^\s-]+)/);
+            if (match) {
+                target = match[1];
+            }
         }
         
         const activeTab = document.querySelector('.option-tab.active');
@@ -721,7 +882,7 @@ export class MonthlyPage {
             
             const tr = document.createElement('tr');
             tr.innerHTML = `
-                <td>${item.month}</td>
+                <td>${this.formatMonth(item.month)}</td>
                 <td style="text-align: right;">${item.order_count.toLocaleString()}</td>
                 <td style="text-align: right;">
                     ¥${item.pay_amount.toLocaleString('zh-CN', {
@@ -749,7 +910,7 @@ export class MonthlyPage {
     
     renderChart(data) {
         const ctx = document.getElementById('salesChart').getContext('2d');
-        const labels = data.map(d => d.month);
+        const labels = data.map(d => this.formatMonth(d.month));
         const amounts = data.map(d => d.total_amount);
         
         this.drawLineChart(ctx, labels, amounts);
@@ -931,7 +1092,7 @@ export class MonthlyPage {
         const result = this.analysisResult;
         const headers = ['月份', '订单数', '支付金额', '充值抵扣', '总金额', '环比增长率'];
         const rows = result.monthly_data.map(item => [
-            item.month,
+            this.formatMonth(item.month),
             item.order_count,
             item.pay_amount.toFixed(2),
             item.recharge_deduction.toFixed(2),
@@ -994,12 +1155,21 @@ export class MonthlyPage {
             // 获取订单明细
             const activeTab = document.querySelector('.option-tab.active');
             const analysisType = activeTab?.dataset.type || 'customer';
-            const targetSelect = document.getElementById('targetSelect');
-            const target = targetSelect?.value || '';
+            const targetInput = document.getElementById('targetInput');
+            const targetValue = targetInput?.value || '';
             
-            if (!target) {
-                this.showError('请先选择分析目标');
+            if (!targetValue || targetValue.trim() === '') {
+                this.showError('请先输入或选择分析目标');
                 return;
+            }
+            
+            // 从输入值中提取实际的值
+            let target = targetValue;
+            if (analysisType === 'customer') {
+                const match = targetValue.match(/^([^\s-]+)/);
+                if (match) {
+                    target = match[1];
+                }
             }
             
             const orderDetails = await invoke('get_order_details', {
@@ -1024,7 +1194,7 @@ export class MonthlyPage {
                 row.city || '',
                 row.district || '',
                 row.region || '',
-                row.month || ''
+                this.formatMonth(row.month) || ''
             ]);
             
             // 添加BOM以支持中文

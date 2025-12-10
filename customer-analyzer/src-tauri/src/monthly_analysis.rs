@@ -383,7 +383,8 @@ fn find_column_indices(header: &[Data]) -> Result<ColumnIndices, String> {
             "市" | "城市" => city_idx = Some(idx),
             "区" | "区县" | "县" => district_idx = Some(idx),
             "地区" | "区域" => region_idx = Some(idx),
-            "日期" | "订单日期" | "下单日期" | "创建时间" | "下单时间" | "支付时间" | "付款时间" | "交易时间" | "时间" | "成交时间" | "签约时间" => date_idx = Some(idx),
+            "日期" | "订单日期" | "下单日期" | "创建时间" | "下单时间" | "支付时间" | "付款时间" | "交易时间" | "时间" | "成交时间" | "签约时间" | 
+            "出库时间" | "出库日期" | "发货时间" | "发货日期" | "完成时间" | "完成日期" | "结算时间" | "结算日期" => date_idx = Some(idx),
             _ => {}
         }
     }
@@ -539,11 +540,42 @@ fn parse_month_from_string(s: &str) -> Option<String> {
         return Some(format!("{}-{:0>2}", year, month));
     }
     
+    // 2024-01-15 10:30:00 格式（带时间）
+    if let Some(cap) = regex_lite::Regex::new(r"^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})")
+        .ok()
+        .and_then(|re| re.captures(s))
+    {
+        let year = cap.get(1)?.as_str();
+        let month = cap.get(2)?.as_str();
+        return Some(format!("{}-{:0>2}", year, month));
+    }
+    
+    // 2024年1月15日 或 2024年1月 格式
+    if let Some(cap) = regex_lite::Regex::new(r"^(\d{4})年(\d{1,2})月")
+        .ok()
+        .and_then(|re| re.captures(s))
+    {
+        let year = cap.get(1)?.as_str();
+        let month = cap.get(2)?.as_str();
+        return Some(format!("{}-{:0>2}", year, month));
+    }
+    
     // 20240115 格式
-    if s.len() >= 6 && s.chars().all(|c| c.is_ascii_digit()) {
+    if s.len() >= 6 && s.chars().take(6).all(|c| c.is_ascii_digit()) {
         let year = &s[0..4];
         let month = &s[4..6];
         return Some(format!("{}-{}", year, month));
+    }
+    
+    // 尝试使用 chrono 解析常见日期格式
+    if let Ok(date) = chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d") {
+        return Some(date.format("%Y-%m").to_string());
+    }
+    if let Ok(date) = chrono::NaiveDate::parse_from_str(s, "%Y/%m/%d") {
+        return Some(date.format("%Y-%m").to_string());
+    }
+    if let Ok(date) = chrono::NaiveDate::parse_from_str(s, "%Y.%m.%d") {
+        return Some(date.format("%Y-%m").to_string());
     }
     
     None
