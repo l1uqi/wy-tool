@@ -38,13 +38,13 @@ export class Top20Page {
                     <div class="data-source-info-card">
                         <div class="ds-info-header">
                             <div class="ds-select-group">
-                                <label class="ds-info-label">选择数据源：</label>
-                                <select class="select-input" id="dataSourceSelect" style="max-width: 400px;">
-                                    <option value="">加载中...</option>
-                                </select>
+                                <label class="ds-info-label">选择数据源（可多选合并分析）：</label>
+                                <div class="data-source-checkboxes" id="dataSourceCheckboxes">
+                                    <p style="color: var(--text-muted);">加载中...</p>
+                                </div>
                             </div>
                         </div>
-                        <button class="btn btn-primary" id="analyzeBtn">
+                        <button class="btn btn-primary" id="analyzeBtn" disabled>
                             <span>🔍</span>
                             开始分析
                         </button>
@@ -129,6 +129,58 @@ export class Top20Page {
                     <button class="btn btn-secondary" id="cancelBtn">取消</button>
                 </div>
             </div>
+            
+            <style>
+                .data-source-checkboxes {
+                    display: flex;
+                    flex-direction: column;
+                    gap: 12px;
+                    max-height: 300px;
+                    overflow-y: auto;
+                    padding: 12px;
+                    background: var(--bg-secondary);
+                    border-radius: 8px;
+                    border: 1px solid var(--border-color);
+                }
+                
+                .data-source-checkbox-item {
+                    display: flex;
+                    align-items: center;
+                    cursor: pointer;
+                    padding: 12px;
+                    border-radius: 8px;
+                    transition: background 0.2s;
+                }
+                
+                .data-source-checkbox-item:hover {
+                    background: rgba(59, 130, 246, 0.1);
+                }
+                
+                .ds-checkbox {
+                    width: 18px;
+                    height: 18px;
+                    margin-right: 12px;
+                    cursor: pointer;
+                    accent-color: var(--accent-blue);
+                }
+                
+                .ds-checkbox-label {
+                    display: flex;
+                    flex-direction: column;
+                    gap: 4px;
+                    flex: 1;
+                }
+                
+                .ds-checkbox-label strong {
+                    color: var(--text-primary);
+                    font-size: 0.95rem;
+                }
+                
+                .ds-checkbox-meta {
+                    color: var(--text-muted);
+                    font-size: 0.85rem;
+                }
+            </style>
         `;
         
         this.bindEvents(container);
@@ -153,9 +205,9 @@ export class Top20Page {
         
         const uploadSection = document.getElementById('uploadSection');
         const dataSourceNotice = document.getElementById('dataSourceNotice');
-        const dataSourceSelect = document.getElementById('dataSourceSelect');
+        const dataSourceCheckboxes = document.getElementById('dataSourceCheckboxes');
         
-        if (!uploadSection || !dataSourceNotice) {
+        if (!uploadSection || !dataSourceNotice || !dataSourceCheckboxes) {
             console.error('DOM元素未找到');
             return;
         }
@@ -169,40 +221,27 @@ export class Top20Page {
                 uploadSection.style.display = 'block';
                 dataSourceNotice.style.display = 'none';
                 
-                // 填充数据源选择下拉框
-                dataSourceSelect.innerHTML = listInfo.data_sources.map(ds => {
-                    const selected = listInfo.current_id === ds.id ? 'selected' : '';
-                    return `<option value="${ds.id}" ${selected}>${this.escapeHtml(ds.file_name)} (${ds.total_rows.toLocaleString()} 行)</option>`;
+                // 填充数据源checkbox列表
+                dataSourceCheckboxes.innerHTML = listInfo.data_sources.map(ds => {
+                    const checked = listInfo.current_id === ds.id ? 'checked' : '';
+                    return `
+                        <label class="data-source-checkbox-item">
+                            <input type="checkbox" value="${ds.id}" ${checked} class="ds-checkbox">
+                            <span class="ds-checkbox-label">
+                                <strong>${this.escapeHtml(ds.file_name)}</strong>
+                                <span class="ds-checkbox-meta">${ds.total_rows.toLocaleString()} 行</span>
+                            </span>
+                        </label>
+                    `;
                 }).join('');
                 
-                // 保存当前选中的数据源ID（不立即加载，等分析时再加载）
-                this.selectedDataSourceId = listInfo.current_id || (listInfo.data_sources.length > 0 ? listInfo.data_sources[0].id : null);
-                
-                // 监听数据源切换（只更新选择，不立即加载）
-                dataSourceSelect.addEventListener('change', async (e) => {
-                    const selectedId = e.target.value;
-                    if (selectedId) {
-                        this.selectedDataSourceId = selectedId;
-                        // 更新提示文字
-                        const statusText = document.getElementById('dataSourceStatus');
-                        if (statusText) {
-                            const selectedOption = dataSourceSelect.options[dataSourceSelect.selectedIndex];
-                            statusText.textContent = `✅ 已选择数据源：${selectedOption.text}，点击"开始分析"按钮即可生成前20大客户排行榜`;
-                        }
-                    }
+                // 监听checkbox变化
+                dataSourceCheckboxes.querySelectorAll('.ds-checkbox').forEach(checkbox => {
+                    checkbox.addEventListener('change', () => this.updateAnalyzeButton());
                 });
                 
-                // 初始化状态文字
-                const statusText = document.getElementById('dataSourceStatus');
-                if (statusText && this.selectedDataSourceId) {
-                    const selectedOption = dataSourceSelect.options[dataSourceSelect.selectedIndex];
-                    if (selectedOption) {
-                        statusText.textContent = `✅ 已选择数据源：${selectedOption.text}，点击"开始分析"按钮即可生成前20大客户排行榜`;
-                    }
-                }
-                
-                // 如果有当前数据源，检查是否需要加载
-                // 不自动加载，等用户点击"开始分析"时再加载
+                // 初始化按钮状态
+                this.updateAnalyzeButton();
             } else {
                 // 没有数据源，显示提示
                 uploadSection.style.display = 'none';
@@ -263,6 +302,30 @@ export class Top20Page {
         }
     }
     
+    updateAnalyzeButton() {
+        const checkboxes = document.querySelectorAll('.ds-checkbox:checked');
+        const analyzeBtn = document.getElementById('analyzeBtn');
+        const statusText = document.getElementById('dataSourceStatus');
+        
+        const selectedCount = checkboxes.length;
+        
+        if (analyzeBtn) {
+            analyzeBtn.disabled = selectedCount === 0;
+        }
+        
+        if (statusText) {
+            if (selectedCount === 0) {
+                statusText.textContent = '⚠️ 请至少选择一个数据源';
+            } else if (selectedCount === 1) {
+                const selected = checkboxes[0];
+                const label = selected.closest('.data-source-checkbox-item').querySelector('strong').textContent;
+                statusText.textContent = `✅ 已选择 1 个数据源：${label}，点击"开始分析"按钮即可生成前20大客户排行榜`;
+            } else {
+                statusText.textContent = `✅ 已选择 ${selectedCount} 个数据源，将合并分析，点击"开始分析"按钮即可生成前20大客户排行榜`;
+            }
+        }
+    }
+    
     async runAnalysis() {
         if (!window.__TAURI__) {
             this.showError('Tauri API 不可用');
@@ -271,29 +334,28 @@ export class Top20Page {
         
         const { invoke } = window.__TAURI__.core;
         
-        // 获取当前选中的数据源
-        const dataSourceSelect = document.getElementById('dataSourceSelect');
-        const selectedId = dataSourceSelect ? dataSourceSelect.value : null;
+        // 获取选中的数据源ID列表
+        const checkboxes = document.querySelectorAll('.ds-checkbox:checked');
+        const selectedIds = Array.from(checkboxes).map(cb => cb.value);
         
-        if (!selectedId) {
-            this.showError('请先选择数据源');
+        if (selectedIds.length === 0) {
+            this.showError('请至少选择一个数据源');
             return;
         }
         
-        // 显示加载界面 - 先加载数据源（如果需要）
-        this.showLoading('步骤 1/2', '正在加载数据源文件...', 0, '');
+        // 显示加载界面
+        this.showLoading('步骤 1/1', '正在分析数据...', 0, '');
         
         try {
-            // 切换数据源（如果缓存中已有这个数据源，会直接返回；如果没有，会加载文件）
-            // 后端会自动检查缓存，如果文件路径匹配，不会重新读取
-            await invoke('switch_data_source', { dataSourceId: selectedId });
-            this.selectedDataSourceId = selectedId;
-            
-            // 更新进度：开始分析
-            this.updateLoadingUI('步骤 2/2', '正在分析数据...', 50, '');
-            
-            // 使用缓存数据进行分析
-            const result = await invoke('analyze_top20_cached');
+            let result;
+            if (selectedIds.length === 1) {
+                // 单个数据源，使用原有逻辑
+                await invoke('switch_data_source', { dataSourceId: selectedIds[0] });
+                result = await invoke('analyze_top20_cached');
+            } else {
+                // 多个数据源，使用合并分析
+                result = await invoke('analyze_top20_multi', { dataSourceIds: selectedIds });
+            }
             
             this.handleResult(result);
         } catch (error) {

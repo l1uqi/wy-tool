@@ -132,6 +132,52 @@ fn delete_data_cache(data_source_id: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// 合并多个数据源的缓存
+fn merge_data_caches(data_source_ids: Vec<String>, _app: &AppHandle) -> Result<DataCache, String> {
+    if data_source_ids.is_empty() {
+        return Err("至少需要选择一个数据源".to_string());
+    }
+    
+    let mut merged_rows: Vec<CachedRow> = Vec::new();
+    let mut merged_customer_map: std::collections::HashMap<String, CustomerData> = 
+        std::collections::HashMap::new();
+    let mut merged_file_paths: Vec<String> = Vec::new();
+    
+    for id in &data_source_ids {
+        match load_data_cache(id)? {
+            Some(cache) => {
+                merged_file_paths.push(cache.file_path.clone());
+                merged_rows.extend(cache.cached_rows.clone());
+                
+                // 合并客户数据映射
+                for (code, customer) in cache.customer_data_map {
+                    merged_customer_map
+                        .entry(code.clone())
+                        .and_modify(|existing| {
+                            existing.pay_amount += customer.pay_amount;
+                            existing.recharge_deduction += customer.recharge_deduction;
+                            existing.total_amount += customer.total_amount;
+                            existing.order_count += customer.order_count;
+                            if existing.customer_name.is_empty() && !customer.customer_name.is_empty() {
+                                existing.customer_name = customer.customer_name.clone();
+                            }
+                        })
+                        .or_insert(customer);
+                }
+            },
+            None => {
+                return Err(format!("数据源 {} 的缓存不存在，请先加载该数据源", id));
+            }
+        }
+    }
+    
+    Ok(DataCache {
+        file_path: merged_file_paths.join("; "),
+        cached_rows: merged_rows,
+        customer_data_map: merged_customer_map,
+    })
+}
+
 /// 读取数据源列表配置
 fn load_data_source_list_config(app: &AppHandle) -> Result<DataSourceListConfig, String> {
     let config_path = get_config_path(app);
@@ -825,6 +871,46 @@ async fn analyze_top20_cached(
     Ok(result)
 }
 
+/// 前20大客户分析（支持多数据源合并）
+#[tauri::command]
+async fn analyze_top20_multi(
+    data_source_ids: Vec<String>,
+    _state: State<'_, AppState>,
+    app: AppHandle,
+) -> Result<AnalysisResult, String> {
+    // 合并多个数据源的缓存
+    let merged_cache = merge_data_caches(data_source_ids, &app)?;
+    
+    let result = tokio::task::spawn_blocking(move || -> Result<AnalysisResult, String> {
+        let mut customers: Vec<CustomerData> = 
+            merged_cache.customer_data_map.values().cloned().collect();
+        
+        // 排序
+        customers.sort_by(|a, b| {
+            b.total_amount
+                .partial_cmp(&a.total_amount)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        
+        let total_amount: f64 = customers.iter().map(|c| c.total_amount).sum();
+        let top20: Vec<CustomerData> = customers.iter().take(20).cloned().collect();
+        let top20_amount: f64 = top20.iter().map(|c| c.total_amount).sum();
+        
+        Ok(AnalysisResult {
+            top20,
+            total_customers: customers.len(),
+            total_amount,
+            top20_amount,
+            total_rows: merged_cache.cached_rows.len(),
+            process_time_ms: 0,
+        })
+    })
+    .await
+    .map_err(|e| format!("任务执行失败: {}", e))??;
+
+    Ok(result)
+}
+
 #[tauri::command]
 async fn analyze_excel(
     file_path: String,
@@ -889,6 +975,96 @@ async fn analyze_monthly_cached(
     .map_err(|e| format!("任务执行失败: {}", e))??;
 
     Ok(result)
+}
+
+/// 基于合并的多个数据源执行月度分析
+#[tauri::command]
+async fn analyze_monthly_multi(
+    data_source_ids: Vec<String>,
+    analysis_type: String,
+    target: String,
+    app: AppHandle,
+) -> Result<MonthlyAnalysisResult, String> {
+    // 合并多个数据源的缓存
+    let merged_cache = merge_data_caches(data_source_ids, &app)?;
+    
+    let result = tokio::task::spawn_blocking(move || {
+        monthly_analysis::analyze_from_cache(
+            &merged_cache.cached_rows, 
+            &analysis_type, 
+            &target
+        )
+    })
+    .await
+    .map_err(|e| format!("任务执行失败: {}", e))??;
+
+    Ok(result)
+}
+
+/// 获取合并后的月度分析选项
+#[tauri::command]
+async fn get_monthly_options_multi(
+    data_source_ids: Vec<String>,
+    app: AppHandle,
+) -> Result<LoadOptionsResult, String> {
+    // 合并多个数据源的缓存
+    let merged_cache = merge_data_caches(data_source_ids, &app)?;
+    
+    // 构建选项
+    let mut customers_map: std::collections::HashMap<String, String> = 
+        std::collections::HashMap::new();
+    let mut provinces_set: std::collections::HashSet<String> = 
+        std::collections::HashSet::new();
+    let mut cities_set: std::collections::HashSet<String> = 
+        std::collections::HashSet::new();
+    let mut districts_set: std::collections::HashSet<String> = 
+        std::collections::HashSet::new();
+    let mut regions_set: std::collections::HashSet<String> = 
+        std::collections::HashSet::new();
+
+    for row in &merged_cache.cached_rows {
+        if !row.customer_code.is_empty() {
+            customers_map.insert(row.customer_code.clone(), row.customer_name.clone());
+        }
+        if let Some(ref p) = row.province {
+            if !p.is_empty() { provinces_set.insert(p.clone()); }
+        }
+        if let Some(ref c) = row.city {
+            if !c.is_empty() { cities_set.insert(c.clone()); }
+        }
+        if let Some(ref d) = row.district {
+            if !d.is_empty() { districts_set.insert(d.clone()); }
+        }
+        if let Some(ref r) = row.region {
+            if !r.is_empty() { regions_set.insert(r.clone()); }
+        }
+    }
+
+    let available_customers: Vec<CustomerOption> = customers_map
+        .into_iter()
+        .map(|(code, name)| CustomerOption { code, name })
+        .collect();
+
+    let mut available_provinces: Vec<String> = provinces_set.into_iter().collect();
+    available_provinces.sort();
+    let mut available_cities: Vec<String> = cities_set.into_iter().collect();
+    available_cities.sort();
+    let mut available_districts: Vec<String> = districts_set.into_iter().collect();
+    available_districts.sort();
+    let mut available_regions: Vec<String> = regions_set.into_iter().collect();
+    available_regions.sort();
+
+    Ok(LoadOptionsResult {
+        file_path: merged_cache.file_path,
+        file_name: "合并数据源".to_string(),
+        available_customers,
+        available_provinces,
+        available_cities,
+        available_districts,
+        available_regions,
+        total_rows: merged_cache.cached_rows.len(),
+        load_time_ms: 0,
+    })
 }
 
 /// 获取月度分析的选项（从缓存）
@@ -1077,9 +1253,12 @@ pub fn run() {
             switch_data_source,
             auto_load_data_source,
             analyze_top20_cached,
+            analyze_top20_multi,
             load_monthly_file,
             get_monthly_options,
+            get_monthly_options_multi,
             analyze_monthly_cached,
+            analyze_monthly_multi,
             clear_data_cache,
             cancel_analysis,
             save_export_file,

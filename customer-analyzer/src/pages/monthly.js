@@ -40,10 +40,10 @@ export class MonthlyPage {
                     <div class="data-source-info-card">
                         <div class="ds-info-header">
                             <div class="ds-select-group">
-                                <label class="ds-info-label">选择数据源：</label>
-                                <select class="select-input" id="dataSourceSelect" style="max-width: 400px;">
-                                    <option value="">加载中...</option>
-                                </select>
+                                <label class="ds-info-label">选择数据源（可多选合并分析）：</label>
+                                <div class="data-source-checkboxes" id="dataSourceCheckboxes">
+                                    <p style="color: var(--text-muted);">加载中...</p>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -283,6 +283,56 @@ export class MonthlyPage {
                 
                 .growth-positive { color: var(--accent-green); }
                 .growth-negative { color: var(--accent-red); }
+                
+                .data-source-checkboxes {
+                    display: flex;
+                    flex-direction: column;
+                    gap: 12px;
+                    max-height: 300px;
+                    overflow-y: auto;
+                    padding: 12px;
+                    background: var(--bg-secondary);
+                    border-radius: 8px;
+                    border: 1px solid var(--border-color);
+                }
+                
+                .data-source-checkbox-item {
+                    display: flex;
+                    align-items: center;
+                    cursor: pointer;
+                    padding: 12px;
+                    border-radius: 8px;
+                    transition: background 0.2s;
+                }
+                
+                .data-source-checkbox-item:hover {
+                    background: rgba(59, 130, 246, 0.1);
+                }
+                
+                .ds-checkbox {
+                    width: 18px;
+                    height: 18px;
+                    margin-right: 12px;
+                    cursor: pointer;
+                    accent-color: var(--accent-blue);
+                }
+                
+                .ds-checkbox-label {
+                    display: flex;
+                    flex-direction: column;
+                    gap: 4px;
+                    flex: 1;
+                }
+                
+                .ds-checkbox-label strong {
+                    color: var(--text-primary);
+                    font-size: 0.95rem;
+                }
+                
+                .ds-checkbox-meta {
+                    color: var(--text-muted);
+                    font-size: 0.85rem;
+                }
             </style>
         `;
         
@@ -298,7 +348,11 @@ export class MonthlyPage {
         
         const uploadSection = document.getElementById('uploadSection');
         const dataSourceNotice = document.getElementById('dataSourceNotice');
-        const dataSourceSelect = document.getElementById('dataSourceSelect');
+        
+        if (!uploadSection || !dataSourceNotice) {
+            console.error('DOM元素未找到');
+            return;
+        }
         
         try {
             const listInfo = await invoke('get_data_source_list_info');
@@ -308,27 +362,27 @@ export class MonthlyPage {
                 uploadSection.style.display = 'block';
                 dataSourceNotice.style.display = 'none';
                 
-                // 填充数据源选择下拉框
-                dataSourceSelect.innerHTML = listInfo.data_sources.map(ds => {
-                    const selected = listInfo.current_id === ds.id ? 'selected' : '';
-                    return `<option value="${ds.id}" ${selected}>${this.escapeHtml(ds.file_name)} (${ds.total_rows.toLocaleString()} 行)</option>`;
+                // 填充数据源checkbox列表
+                const dataSourceCheckboxes = document.getElementById('dataSourceCheckboxes');
+                dataSourceCheckboxes.innerHTML = listInfo.data_sources.map(ds => {
+                    const checked = listInfo.current_id === ds.id ? 'checked' : '';
+                    return `
+                        <label class="data-source-checkbox-item">
+                            <input type="checkbox" value="${ds.id}" ${checked} class="ds-checkbox">
+                            <span class="ds-checkbox-label">
+                                <strong>${this.escapeHtml(ds.file_name)}</strong>
+                                <span class="ds-checkbox-meta">${ds.total_rows.toLocaleString()} 行</span>
+                            </span>
+                        </label>
+                    `;
                 }).join('');
                 
-                // 监听数据源切换
-                dataSourceSelect.addEventListener('change', async (e) => {
-                    const selectedId = e.target.value;
-                    if (selectedId) {
-                        try {
-                            await invoke('switch_data_source', { dataSourceId: selectedId });
-                            this.showToast('✅ 已切换到该数据源');
-                            await this.loadOptions();
-                        } catch (error) {
-                            this.showError('切换数据源失败: ' + error);
-                        }
-                    }
+                // 监听checkbox变化
+                dataSourceCheckboxes.querySelectorAll('.ds-checkbox').forEach(checkbox => {
+                    checkbox.addEventListener('change', () => this.updateDataSourceSelection());
                 });
                 
-                // 如果有当前数据源，自动加载
+                // 如果有当前数据源，自动加载选项
                 if (listInfo.current_id) {
                     try {
                         await invoke('auto_load_data_source');
@@ -358,13 +412,44 @@ export class MonthlyPage {
         return div.innerHTML;
     }
     
+    updateDataSourceSelection() {
+        const checkboxes = document.querySelectorAll('.ds-checkbox:checked');
+        const selectedCount = checkboxes.length;
+        
+        if (selectedCount > 0) {
+            this.loadOptions();
+        } else {
+            document.getElementById('analysisOptions').style.display = 'none';
+            this.isDataLoaded = false;
+        }
+    }
+    
     async loadOptions() {
         if (!window.__TAURI__) return;
         
         const { invoke } = window.__TAURI__.core;
         
         try {
-            const result = await invoke('get_monthly_options');
+            // 获取选中的数据源ID列表
+            const checkboxes = document.querySelectorAll('.ds-checkbox:checked');
+            const selectedIds = Array.from(checkboxes).map(cb => cb.value);
+            
+            if (selectedIds.length === 0) {
+                document.getElementById('analysisOptions').style.display = 'none';
+                this.isDataLoaded = false;
+                return;
+            }
+            
+            let result;
+            if (selectedIds.length === 1) {
+                // 单个数据源，使用原有逻辑
+                await invoke('switch_data_source', { dataSourceId: selectedIds[0] });
+                result = await invoke('get_monthly_options');
+            } else {
+                // 多个数据源，使用合并选项
+                result = await invoke('get_monthly_options_multi', { dataSourceIds: selectedIds });
+            }
+            
             if (result) {
                 this.fileOptions = result;
                 this.isDataLoaded = true;
@@ -376,7 +461,9 @@ export class MonthlyPage {
                 this.updateTargetSelect();
                 
                 document.getElementById('analysisOptions').style.display = 'block';
-                document.getElementById('cacheStatus').textContent = '✅ 数据已缓存';
+                const selectedCount = selectedIds.length;
+                document.getElementById('cacheStatus').textContent = 
+                    selectedCount > 1 ? `✅ ${selectedCount} 个数据源已合并` : '✅ 数据已缓存';
             }
         } catch (error) {
             console.error('加载选项失败:', error);
@@ -547,10 +634,31 @@ export class MonthlyPage {
         analyzeBtn.innerHTML = '<span>⏳</span> 分析中...';
         
         try {
-            const result = await invoke('analyze_monthly_cached', {
-                analysisType,
-                target
-            });
+            // 获取选中的数据源ID列表
+            const checkboxes = document.querySelectorAll('.ds-checkbox:checked');
+            const selectedIds = Array.from(checkboxes).map(cb => cb.value);
+            
+            if (selectedIds.length === 0) {
+                this.showError('请至少选择一个数据源');
+                return;
+            }
+            
+            let result;
+            if (selectedIds.length === 1) {
+                // 单个数据源，使用原有逻辑
+                await invoke('switch_data_source', { dataSourceId: selectedIds[0] });
+                result = await invoke('analyze_monthly_cached', {
+                    analysisType,
+                    target
+                });
+            } else {
+                // 多个数据源，使用合并分析
+                result = await invoke('analyze_monthly_multi', {
+                    dataSourceIds: selectedIds,
+                    analysisType,
+                    target
+                });
+            }
             
             this.analysisResult = result;
             this.displayResult(result, analysisType);
