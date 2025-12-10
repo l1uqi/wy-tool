@@ -63,6 +63,16 @@ export class HomePage {
                         <span class="feature-badge new">✨ 新功能</span>
                     </div>
                     
+                    <div class="feature-card slide-up" data-feature="rebate">
+                        <div class="feature-icon green">✨</div>
+                        <h3 class="feature-title">返利计算</h3>
+                        <p class="feature-desc">
+                            支持区间挂网底价的返利计算，导入挂网底价表和订单表即可快速计算返利，
+                            自动处理复杂的返利规则和条件判断
+                        </p>
+                        <span class="feature-badge new">✨ 新功能</span>
+                    </div>
+                    
                     <div class="feature-card slide-up" data-feature="coming">
                         <div class="feature-icon cyan">🗂️</div>
                         <h3 class="feature-title">客户账务分类</h3>
@@ -316,6 +326,8 @@ export class HomePage {
                     window.location.hash = 'top20';
                 } else if (feature === 'monthly') {
                     window.location.hash = 'monthly';
+                } else if (feature === 'rebate') {
+                    window.location.hash = 'rebate';
                 } else if (feature === 'coming') {
                     this.showToast('该功能正在开发中，敬请期待！');
                 }

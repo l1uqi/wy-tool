@@ -865,6 +865,25 @@ async fn save_export_file(
     Ok(())
 }
 
+/// 保存 Excel 文件（base64 编码）
+#[tauri::command]
+async fn save_excel_file(
+    file_path: String,
+    content: String,
+) -> Result<(), String> {
+    use base64::{Engine as _, engine::general_purpose};
+    
+    // 解码 base64 字符串为二进制数据
+    let bytes = general_purpose::STANDARD
+        .decode(content)
+        .map_err(|e| format!("Base64 解码失败: {}", e))?;
+    
+    // 保存二进制数据到文件
+    fs::write(&file_path, bytes)
+        .map_err(|e| format!("保存文件失败: {}", e))?;
+    Ok(())
+}
+
 /// 获取订单明细（用于导出）
 #[tauri::command]
 async fn get_order_details(
@@ -932,6 +951,7 @@ pub fn run() {
             clear_data_cache,
             cancel_analysis,
             save_export_file,
+            save_excel_file,
             get_order_details
         ])
         .run(tauri::generate_context!())

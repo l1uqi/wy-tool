@@ -2,6 +2,7 @@
 import { HomePage } from './pages/home.js';
 import { Top20Page } from './pages/top20.js';
 import { MonthlyPage } from './pages/monthly.js';
+import { RebatePage } from './pages/rebate.js';
 
 class App {
     constructor() {
@@ -9,7 +10,8 @@ class App {
         this.pages = {
             home: new HomePage(this),
             top20: new Top20Page(this),
-            monthly: new MonthlyPage(this)
+            monthly: new MonthlyPage(this),
+            rebate: new RebatePage(this)
         };
         
         this.init();
@@ -42,6 +44,7 @@ class App {
                     <a class="nav-link" data-page="home">首页</a>
                     <a class="nav-link" data-page="top20">前20大客户</a>
                     <a class="nav-link" data-page="monthly">月度分析</a>
+                    <a class="nav-link" data-page="rebate">返利分析</a>
                 </div>
             </nav>
             <main id="page-content"></main>
