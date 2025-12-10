@@ -16,7 +16,7 @@ struct AppState {
     data_cache: Arc<Mutex<Option<DataCache>>>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 struct DataCache {
     file_path: String,
     cached_rows: Vec<CachedRow>,
@@ -72,18 +72,64 @@ struct DataSourceListInfo {
     current_id: Option<String>,
 }
 
-/// 获取配置文件路径
-fn get_config_path(_app: &AppHandle) -> PathBuf {
-    // 使用用户数据目录
-    let app_data_dir = dirs::data_dir()
+/// 获取应用数据目录
+fn get_app_data_dir() -> PathBuf {
+    dirs::data_dir()
         .map(|d| d.join("customer-analyzer"))
         .unwrap_or_else(|| {
-            // 如果获取用户数据目录失败，使用当前目录
             env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
-        });
-    
+        })
+}
+
+/// 获取配置文件路径
+fn get_config_path(_app: &AppHandle) -> PathBuf {
+    let app_data_dir = get_app_data_dir();
     std::fs::create_dir_all(&app_data_dir).unwrap_or_default();
     app_data_dir.join("data_source.json")
+}
+
+/// 获取数据源缓存文件路径
+fn get_cache_path(data_source_id: &str) -> PathBuf {
+    let app_data_dir = get_app_data_dir();
+    std::fs::create_dir_all(&app_data_dir).unwrap_or_default();
+    app_data_dir.join(format!("cache_{}.json", data_source_id))
+}
+
+/// 保存数据源缓存到文件
+fn save_data_cache(data_source_id: &str, cache: &DataCache) -> Result<(), String> {
+    let cache_path = get_cache_path(data_source_id);
+    let json = serde_json::to_string_pretty(cache)
+        .map_err(|e| format!("序列化缓存失败: {}", e))?;
+    fs::write(&cache_path, json)
+        .map_err(|e| format!("保存缓存文件失败: {}", e))?;
+    Ok(())
+}
+
+/// 从文件加载数据源缓存
+fn load_data_cache(data_source_id: &str) -> Result<Option<DataCache>, String> {
+    let cache_path = get_cache_path(data_source_id);
+    
+    if !cache_path.exists() {
+        return Ok(None);
+    }
+    
+    let content = fs::read_to_string(&cache_path)
+        .map_err(|e| format!("读取缓存文件失败: {}", e))?;
+    
+    let cache: DataCache = serde_json::from_str(&content)
+        .map_err(|e| format!("解析缓存文件失败: {}", e))?;
+    
+    Ok(Some(cache))
+}
+
+/// 删除数据源缓存文件
+fn delete_data_cache(data_source_id: &str) -> Result<(), String> {
+    let cache_path = get_cache_path(data_source_id);
+    if cache_path.exists() {
+        fs::remove_file(&cache_path)
+            .map_err(|e| format!("删除缓存文件失败: {}", e))?;
+    }
+    Ok(())
 }
 
 /// 读取数据源列表配置
@@ -232,24 +278,14 @@ async fn add_data_source(
             });
     }
 
-    // 缓存数据
-    {
-        let mut cache = data_cache.lock().unwrap();
-        *cache = Some(DataCache {
-            file_path: result.file_path.clone(),
-            cached_rows: result.cached_rows.clone(),
-            customer_data_map,
-        });
-    }
-
+    // 添加到数据源列表
+    let id = uuid::Uuid::new_v4().to_string();
     let file_name = std::path::Path::new(&result.file_path)
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("未知文件")
         .to_string();
-
-    // 添加到数据源列表
-    let id = uuid::Uuid::new_v4().to_string();
+    
     config.data_sources.push(DataSourceConfig {
         id: id.clone(),
         file_path: result.file_path.clone(),
@@ -260,6 +296,22 @@ async fn add_data_source(
     
     // 设置为当前数据源
     config.current_id = Some(id.clone());
+    
+    // 创建缓存对象
+    let cache_obj = DataCache {
+        file_path: result.file_path.clone(),
+        cached_rows: result.cached_rows.clone(),
+        customer_data_map,
+    };
+    
+    // 保存缓存到文件（持久化）
+    save_data_cache(&id, &cache_obj)?;
+    
+    // 缓存到内存
+    {
+        let mut cache = data_cache.lock().unwrap();
+        *cache = Some(cache_obj);
+    }
     
     // 保存配置
     save_data_source_list_config(&app, &config)?;
@@ -358,6 +410,9 @@ async fn delete_data_source(
     // 检查是否是当前数据源
     let is_current = config.current_id.as_ref() == Some(&data_source_id);
     
+    // 删除数据源缓存文件
+    let _ = delete_data_cache(&data_source_id);
+    
     // 删除数据源
     config.data_sources.retain(|ds| ds.id != data_source_id);
     
@@ -403,7 +458,7 @@ async fn load_data_source_by_id(
         .find(|ds| ds.id == data_source_id)
         .ok_or("数据源不存在")?;
     
-    // 检查缓存是否已经是这个数据源
+    // 检查内存缓存是否已经是这个数据源
     {
         let cache = state.data_cache.lock().unwrap();
         if let Some(ref data_cache) = *cache {
@@ -467,7 +522,78 @@ async fn load_data_source_by_id(
         }
     }
     
-    // 需要加载数据源
+    // 尝试从文件加载缓存（持久化）
+    if let Ok(Some(cached_data)) = load_data_cache(&data_source_id) {
+        // 验证文件路径是否匹配（防止文件被移动或重命名）
+        if cached_data.file_path == data_source.file_path {
+            // 从缓存构建返回结果
+            let mut customers_map: std::collections::HashMap<String, String> = 
+                std::collections::HashMap::new();
+            let mut provinces_set: std::collections::HashSet<String> = 
+                std::collections::HashSet::new();
+            let mut cities_set: std::collections::HashSet<String> = 
+                std::collections::HashSet::new();
+            let mut districts_set: std::collections::HashSet<String> = 
+                std::collections::HashSet::new();
+            let mut regions_set: std::collections::HashSet<String> = 
+                std::collections::HashSet::new();
+
+            for row in &cached_data.cached_rows {
+                if !row.customer_code.is_empty() {
+                    customers_map.insert(row.customer_code.clone(), row.customer_name.clone());
+                }
+                if let Some(ref p) = row.province {
+                    if !p.is_empty() { provinces_set.insert(p.clone()); }
+                }
+                if let Some(ref c) = row.city {
+                    if !c.is_empty() { cities_set.insert(c.clone()); }
+                }
+                if let Some(ref d) = row.district {
+                    if !d.is_empty() { districts_set.insert(d.clone()); }
+                }
+                if let Some(ref r) = row.region {
+                    if !r.is_empty() { regions_set.insert(r.clone()); }
+                }
+            }
+
+            let available_customers: Vec<CustomerOption> = customers_map
+                .into_iter()
+                .map(|(code, name)| CustomerOption { code, name })
+                .collect();
+
+            let mut available_provinces: Vec<String> = provinces_set.into_iter().collect();
+            available_provinces.sort();
+            let mut available_cities: Vec<String> = cities_set.into_iter().collect();
+            available_cities.sort();
+            let mut available_districts: Vec<String> = districts_set.into_iter().collect();
+            available_districts.sort();
+            let mut available_regions: Vec<String> = regions_set.into_iter().collect();
+            available_regions.sort();
+
+            // 保存总行数（在移动之前）
+            let total_rows = cached_data.cached_rows.len();
+
+            // 加载到内存缓存
+            {
+                let mut cache = state.data_cache.lock().unwrap();
+                *cache = Some(cached_data);
+            }
+
+            return Ok(LoadOptionsResult {
+                file_path: data_source.file_path.clone(),
+                file_name: data_source.file_name.clone(),
+                available_customers,
+                available_provinces,
+                available_cities,
+                available_districts,
+                available_regions,
+                total_rows,
+                load_time_ms: 0,
+            });
+        }
+    }
+    
+    // 缓存不存在或文件路径不匹配，需要从Excel文件重新加载
     {
         let mut flag = state.cancel_flag.lock().unwrap();
         *flag = false;
@@ -521,19 +647,25 @@ async fn load_data_source_by_id(
             });
     }
 
-    // 更新缓存
+    // 创建缓存对象
+    let cache_obj = DataCache {
+        file_path: result.file_path.clone(),
+        cached_rows: result.cached_rows.clone(),
+        customer_data_map,
+    };
+    
+    // 保存缓存到文件（持久化）
+    save_data_cache(&data_source_id, &cache_obj)?;
+    
+    // 更新内存缓存
     {
         let mut cache = data_cache.lock().unwrap();
-        *cache = Some(DataCache {
-            file_path: result.file_path.clone(),
-            cached_rows: result.cached_rows.clone(),
-            customer_data_map,
-        });
+        *cache = Some(cache_obj);
     }
 
     // 更新配置中的当前数据源
     let mut config = load_data_source_list_config(&app)?;
-    config.current_id = Some(data_source_id);
+    config.current_id = Some(data_source_id.clone());
     save_data_source_list_config(&app, &config)?;
 
     let file_name = std::path::Path::new(&result.file_path)

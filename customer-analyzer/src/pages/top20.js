@@ -7,6 +7,7 @@ export class Top20Page {
         this.startTime = null;
         this.timerInterval = null;
         this.unlistenProgress = null;
+        this.selectedDataSourceId = null;
     }
     
     async render(container) {
@@ -58,8 +59,8 @@ export class Top20Page {
                             <li><strong>充值抵扣</strong> - 充值抵扣金额（必需）</li>
                         </ul>
                         <p>💡 金额计算公式：总金额 = 支付金额 + 充值抵扣</p>
-                        <p style="margin-top: 12px; color: var(--accent-green);">
-                            ✅ 数据源已加载，点击"开始分析"按钮即可生成前20大客户排行榜
+                        <p style="margin-top: 12px; color: var(--accent-green);" id="dataSourceStatus">
+                            ✅ 请选择数据源，点击"开始分析"按钮即可生成前20大客户排行榜
                         </p>
                     </div>
                 </div>
@@ -174,27 +175,34 @@ export class Top20Page {
                     return `<option value="${ds.id}" ${selected}>${this.escapeHtml(ds.file_name)} (${ds.total_rows.toLocaleString()} 行)</option>`;
                 }).join('');
                 
-                // 监听数据源切换
+                // 保存当前选中的数据源ID（不立即加载，等分析时再加载）
+                this.selectedDataSourceId = listInfo.current_id || (listInfo.data_sources.length > 0 ? listInfo.data_sources[0].id : null);
+                
+                // 监听数据源切换（只更新选择，不立即加载）
                 dataSourceSelect.addEventListener('change', async (e) => {
                     const selectedId = e.target.value;
                     if (selectedId) {
-                        try {
-                            await invoke('switch_data_source', { dataSourceId: selectedId });
-                            this.showToast('✅ 已切换到该数据源');
-                        } catch (error) {
-                            this.showError('切换数据源失败: ' + error);
+                        this.selectedDataSourceId = selectedId;
+                        // 更新提示文字
+                        const statusText = document.getElementById('dataSourceStatus');
+                        if (statusText) {
+                            const selectedOption = dataSourceSelect.options[dataSourceSelect.selectedIndex];
+                            statusText.textContent = `✅ 已选择数据源：${selectedOption.text}，点击"开始分析"按钮即可生成前20大客户排行榜`;
                         }
                     }
                 });
                 
-                // 如果有当前数据源，自动加载
-                if (listInfo.current_id) {
-                    try {
-                        await invoke('auto_load_data_source');
-                    } catch (error) {
-                        console.warn('自动加载数据源失败:', error);
+                // 初始化状态文字
+                const statusText = document.getElementById('dataSourceStatus');
+                if (statusText && this.selectedDataSourceId) {
+                    const selectedOption = dataSourceSelect.options[dataSourceSelect.selectedIndex];
+                    if (selectedOption) {
+                        statusText.textContent = `✅ 已选择数据源：${selectedOption.text}，点击"开始分析"按钮即可生成前20大客户排行榜`;
                     }
                 }
+                
+                // 如果有当前数据源，检查是否需要加载
+                // 不自动加载，等用户点击"开始分析"时再加载
             } else {
                 // 没有数据源，显示提示
                 uploadSection.style.display = 'none';
@@ -263,10 +271,27 @@ export class Top20Page {
         
         const { invoke } = window.__TAURI__.core;
         
-        // 显示加载界面
-        this.showLoading('步骤 1/3', '正在分析数据...', 0, '');
+        // 获取当前选中的数据源
+        const dataSourceSelect = document.getElementById('dataSourceSelect');
+        const selectedId = dataSourceSelect ? dataSourceSelect.value : null;
+        
+        if (!selectedId) {
+            this.showError('请先选择数据源');
+            return;
+        }
+        
+        // 显示加载界面 - 先加载数据源（如果需要）
+        this.showLoading('步骤 1/2', '正在加载数据源文件...', 0, '');
         
         try {
+            // 切换数据源（如果缓存中已有这个数据源，会直接返回；如果没有，会加载文件）
+            // 后端会自动检查缓存，如果文件路径匹配，不会重新读取
+            await invoke('switch_data_source', { dataSourceId: selectedId });
+            this.selectedDataSourceId = selectedId;
+            
+            // 更新进度：开始分析
+            this.updateLoadingUI('步骤 2/2', '正在分析数据...', 50, '');
+            
             // 使用缓存数据进行分析
             const result = await invoke('analyze_top20_cached');
             

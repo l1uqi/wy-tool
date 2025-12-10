@@ -210,13 +210,11 @@ export class HomePage {
     renderDataSourceItems(itemsContainer, listInfo) {
         
         itemsContainer.innerHTML = listInfo.data_sources.map(ds => {
-            const isCurrent = listInfo.current_id === ds.id;
             return `
-                <div class="data-source-item ${isCurrent ? 'current' : ''}" data-id="${ds.id}">
+                <div class="data-source-item" data-id="${ds.id}">
                     <div class="ds-item-main">
                         <div class="ds-item-info">
                             <div class="ds-item-name">
-                                ${isCurrent ? '<span class="current-badge">当前</span>' : ''}
                                 <strong>${this.escapeHtml(ds.file_name)}</strong>
                             </div>
                             <div class="ds-item-meta">
@@ -226,11 +224,6 @@ export class HomePage {
                             </div>
                         </div>
                         <div class="ds-item-actions">
-                            ${!isCurrent ? `
-                                <button class="btn btn-sm btn-primary switch-ds-btn" data-id="${ds.id}">
-                                    <span>✓</span> 使用
-                                </button>
-                            ` : ''}
                             <button class="btn btn-sm btn-danger delete-ds-btn" data-id="${ds.id}">
                                 <span>🗑️</span> 删除
                             </button>
@@ -242,18 +235,7 @@ export class HomePage {
         
         console.log('数据源列表HTML已更新，绑定事件...');
         
-        // 绑定事件
-        itemsContainer.querySelectorAll('.switch-ds-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                const button = e.currentTarget;
-                const id = button.dataset.id;
-                if (id) {
-                    this.switchDataSource(id);
-                }
-            });
-        });
-        
+        // 绑定删除事件
         itemsContainer.querySelectorAll('.delete-ds-btn').forEach(btn => {
             btn.addEventListener('click', async (e) => {
                 e.stopPropagation();
@@ -269,19 +251,6 @@ export class HomePage {
         console.log('事件绑定完成');
     }
     
-    async switchDataSource(id) {
-        if (!window.__TAURI__) return;
-        
-        const { invoke } = window.__TAURI__.core;
-        
-        try {
-            await invoke('switch_data_source', { dataSourceId: id });
-            this.showToast('✅ 已切换到该数据源');
-            await this.loadDataSourceInfo();
-        } catch (error) {
-            this.showError('切换数据源失败: ' + error);
-        }
-    }
     
     async deleteDataSource(id) {
         if (!window.__TAURI__) {
