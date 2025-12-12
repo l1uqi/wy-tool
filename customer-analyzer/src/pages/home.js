@@ -4,6 +4,7 @@ export class HomePage {
         this.app = app;
         this.dataSourceInfo = null;
         this.unlistenProgress = null;
+        this.currentImportingFileIndex = null;
     }
     
     async render(container) {
@@ -37,6 +38,7 @@ export class HomePage {
                                     <div class="progress-bar" id="progressBar"></div>
                                 </div>
                                 <p class="progress-text" id="progressText">正在导入数据源...</p>
+                                <p class="progress-detail" id="progressDetail" style="margin-top: 8px; font-size: 0.9rem; color: var(--text-muted);"></p>
                             </div>
                         </div>
                     </div>
@@ -132,37 +134,49 @@ export class HomePage {
     }
     
     async setupProgressListener() {
-        if (!window.__TAURI__) return;
-        
-        const { listen } = window.__TAURI__.event;
-        
-        if (this.unlistenProgress) {
-            this.unlistenProgress();
-        }
-        
-        this.unlistenProgress = await listen('excel-progress', (event) => {
-            const progress = event.payload;
-            this.updateProgress(progress);
-        });
+        // 进度监听器已在 App 级别设置，这里不需要重复设置
+        // 但保留方法以兼容现有代码
     }
     
     updateProgress(progress) {
-        const progressContainer = document.getElementById('importProgress');
-        const progressBar = document.getElementById('progressBar');
-        const progressText = document.getElementById('progressText');
+        const percent = Math.round(progress.percent || 0);
         
-        if (progressContainer && progressBar && progressText) {
-            progressContainer.style.display = 'block';
-            const percent = Math.round(progress.percent || 0);
-            progressBar.style.width = `${percent}%`;
-            progressText.textContent = `正在导入数据源... ${percent}%`;
+        // 如果有当前导入的文件索引（串行导入），更新该文件的进度条
+        if (this.currentImportingFileIndex !== null && this.currentImportingFileIndex !== undefined) {
+            if (window.app && window.app.updateFileProgress) {
+                window.app.updateFileProgress(
+                    this.currentImportingFileIndex,
+                    percent,
+                    '导入中',
+                    `${percent}%`
+                );
+            }
+        } else {
+            // 单个文件导入，使用全局进度显示
+            if (window.app && window.app.updateGlobalProgress) {
+                window.app.updateGlobalProgress(progress);
+            }
+        }
+    }
+    
+    updateProgressOverall(percent, text) {
+        // 使用全局进度显示
+        if (window.app && window.app.updateGlobalProgressOverall) {
+            window.app.updateGlobalProgressOverall(percent, text);
+        }
+    }
+    
+    updateProgressDetail(detail) {
+        // 使用全局进度显示
+        if (window.app && window.app.updateGlobalProgressDetail) {
+            window.app.updateGlobalProgressDetail(detail);
         }
     }
     
     hideProgress() {
-        const progressContainer = document.getElementById('importProgress');
-        if (progressContainer) {
-            progressContainer.style.display = 'none';
+        // 使用全局进度显示
+        if (window.app && window.app.hideGlobalProgress) {
+            window.app.hideGlobalProgress();
         }
     }
     
@@ -178,7 +192,20 @@ export class HomePage {
             console.log('开始加载数据源列表...');
             const listInfo = await invoke('get_data_source_list_info');
             console.log('获取到的数据源列表:', listInfo);
+            
+            // 确保UI更新
             this.updateDataSourceUI(listInfo);
+            
+            // 如果UI更新失败，延迟重试一次
+            setTimeout(() => {
+                const itemsContainer = document.getElementById('dataSourceItems');
+                if (!itemsContainer || itemsContainer.children.length === 0) {
+                    if (listInfo && listInfo.data_sources && listInfo.data_sources.length > 0) {
+                        console.log('UI更新可能失败，重试更新...');
+                        this.updateDataSourceUI(listInfo);
+                    }
+                }
+            }, 100);
         } catch (error) {
             console.error('加载数据源信息失败:', error);
             this.updateDataSourceUI({ data_sources: [], current_id: null });
@@ -326,79 +353,152 @@ export class HomePage {
         const { open } = window.__TAURI__.dialog;
         
         try {
+            // 支持多选文件
             const selected = await open({
-                multiple: false,
+                multiple: true,
                 filters: [{
                     name: 'Excel文件',
                     extensions: ['xlsx', 'xls']
                 }]
             });
             
-            if (selected) {
-                console.log('选择的文件:', selected);
-                
-                // 显示导入进度提示
-                this.showImportProgress();
-                
-                try {
-                    console.log('开始添加数据源...');
-                    const result = await invoke('add_data_source', { filePath: selected });
-                    console.log('添加数据源结果:', result);
-                    
-                    // 隐藏进度提示
-                    this.hideProgress();
-                    
-                    this.showToast(`✅ 数据源添加成功！共 ${result.total_rows.toLocaleString()} 行数据`);
-                    
-                    // 等待一下确保后端保存完成
-                    await new Promise(resolve => setTimeout(resolve, 200));
-                    
-                    // 重新加载数据源列表
-                    console.log('重新加载数据源列表...');
-                    try {
-                        await this.loadDataSourceInfo();
-                        console.log('数据源列表已刷新');
-                        
-                        // 再次检查，确保UI已更新
-                        setTimeout(() => {
-                            const itemsContainer = document.getElementById('dataSourceItems');
-                            const emptyHint = document.getElementById('emptyHint');
-                            console.log('UI检查:', {
-                                itemsContainer: !!itemsContainer,
-                                emptyHint: !!emptyHint,
-                                itemsCount: itemsContainer?.children.length || 0,
-                                emptyHintDisplay: emptyHint?.style.display
-                            });
-                        }, 300);
-                    } catch (error) {
-                        console.error('刷新数据源列表失败:', error);
-                        // 即使失败也尝试重新加载
-                        setTimeout(() => this.loadDataSourceInfo(), 500);
-                    }
-                } catch (error) {
-                    console.error('添加数据源失败:', error);
-                    // 隐藏进度提示
-                    this.hideProgress();
-                    this.showError('添加数据源失败: ' + error);
-                }
-            } else {
+            if (!selected) {
                 console.log('用户取消了文件选择');
+                return;
             }
+            
+            // 处理文件选择结果（可能是字符串或数组）
+            const filePaths = Array.isArray(selected) ? selected : [selected];
+            
+            if (filePaths.length === 0) {
+                return;
+            }
+            
+            // 如果只有一个文件，直接导入
+            if (filePaths.length === 1) {
+                await this.importSingleFile(filePaths[0]);
+                return;
+            }
+            
+            // 多个文件，直接使用排队导入
+            await this.importFilesSequential(filePaths);
+            
         } catch (error) {
             console.error('选择文件失败:', error);
-            this.showError('选择文件失败: ' + error);
+            if (error !== '用户取消操作') {
+                this.showError('选择文件失败: ' + error);
+            }
         }
     }
     
-    showImportProgress() {
-        const progressContainer = document.getElementById('importProgress');
-        const progressBar = document.getElementById('progressBar');
-        const progressText = document.getElementById('progressText');
+    async importSingleFile(filePath) {
+        const { invoke } = window.__TAURI__.core;
         
-        if (progressContainer && progressBar && progressText) {
-            progressContainer.style.display = 'block';
-            progressBar.style.width = '0%';
-            progressText.textContent = '正在导入数据源，请稍候...';
+        console.log('选择的文件:', filePath);
+        
+        // 显示导入进度提示
+        this.showImportProgress(filePath, 1, 1);
+        
+        try {
+            console.log('开始添加数据源...');
+            const result = await invoke('add_data_source', { filePath: filePath });
+            console.log('添加数据源结果:', result);
+            
+            // 隐藏进度提示
+            this.hideProgress();
+            
+            this.showToast(`✅ 数据源添加成功！共 ${result.total_rows.toLocaleString()} 行数据`);
+            
+            // 立即重新加载数据源列表
+            await this.loadDataSourceInfo();
+            
+            // 确保UI已更新，如果失败则重试
+            setTimeout(async () => {
+                await this.loadDataSourceInfo();
+            }, 300);
+        } catch (error) {
+            console.error('添加数据源失败:', error);
+            this.hideProgress();
+            this.showError('添加数据源失败: ' + error);
+        }
+    }
+    
+    async importFilesSequential(filePaths) {
+        const { invoke } = window.__TAURI__.core;
+        const totalFiles = filePaths.length;
+        let successCount = 0;
+        let failCount = 0;
+        const errors = [];
+        
+        // 显示多文件进度条
+        if (window.app && window.app.showGlobalProgress) {
+            window.app.showGlobalProgress('', 0, totalFiles, filePaths);
+        }
+        
+        // 存储当前导入的文件索引，用于进度事件监听
+        this.currentImportingFileIndex = null;
+        
+        try {
+            // 串行导入文件
+            for (let i = 0; i < filePaths.length; i++) {
+                const filePath = filePaths[i];
+                this.currentImportingFileIndex = i;
+                
+                // 更新文件状态为"导入中"
+                if (window.app && window.app.updateFileProgress) {
+                    window.app.updateFileProgress(i, 0, '导入中', '0%');
+                }
+                
+                try {
+                    const result = await invoke('add_data_source', { filePath: filePath });
+                    successCount++;
+                    
+                    // 更新文件进度为完成
+                    if (window.app && window.app.updateFileProgress) {
+                        window.app.updateFileProgress(i, 100, '完成', '100%');
+                    }
+                    
+                    // 每个文件导入成功后立即更新数据源列表
+                    await this.loadDataSourceInfo();
+                } catch (error) {
+                    failCount++;
+                    errors.push({ filePath, error: String(error) });
+                    console.error(`导入文件失败:`, error);
+                    
+                    // 更新文件进度为失败
+                    if (window.app && window.app.updateFileProgress) {
+                        window.app.updateFileProgress(i, 100, '失败', '失败');
+                    }
+                }
+            }
+            
+            this.currentImportingFileIndex = null;
+            
+            // 隐藏进度提示
+            this.hideProgress();
+            
+            // 显示结果
+            if (failCount === 0) {
+                this.showToast(`✅ 成功导入 ${successCount} 个数据源！`);
+            } else {
+                this.showError(`导入完成：成功 ${successCount} 个，失败 ${failCount} 个\n\n失败文件：\n${errors.map(e => e.filePath.split(/[/\\]/).pop()).join('\n')}`);
+            }
+            
+            // 最后再次刷新数据源列表，确保所有数据都已更新
+            await this.loadDataSourceInfo();
+            
+        } catch (error) {
+            console.error('批量导入失败:', error);
+            this.currentImportingFileIndex = null;
+            this.hideProgress();
+            this.showError('批量导入失败: ' + error);
+        }
+    }
+    
+    showImportProgress(fileName = '', current = 1, total = 1, filePaths = []) {
+        // 使用全局进度显示
+        if (window.app && window.app.showGlobalProgress) {
+            window.app.showGlobalProgress(fileName, current, total, filePaths);
         }
     }
     

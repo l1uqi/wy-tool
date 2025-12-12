@@ -40,7 +40,12 @@ export class MonthlyPage {
                     <div class="data-source-info-card">
                         <div class="ds-info-header">
                             <div class="ds-select-group">
-                                <label class="ds-info-label">选择数据源（可多选合并分析）：</label>
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                                    <label class="ds-info-label">选择数据源（可多选合并分析）：</label>
+                                    <button type="button" class="btn-select-all" id="selectAllBtn" style="padding: 4px 12px; font-size: 12px; background: var(--accent-blue); color: white; border: none; border-radius: 4px; cursor: pointer;">
+                                        全选
+                                    </button>
+                                </div>
                                 <div class="data-source-checkboxes" id="dataSourceCheckboxes">
                                     <p style="color: var(--text-muted);">加载中...</p>
                                 </div>
@@ -421,8 +426,20 @@ export class MonthlyPage {
                 
                 // 监听checkbox变化
                 dataSourceCheckboxes.querySelectorAll('.ds-checkbox').forEach(checkbox => {
-                    checkbox.addEventListener('change', () => this.updateDataSourceSelection());
+                    checkbox.addEventListener('change', () => {
+                        this.updateDataSourceSelection();
+                        this.updateSelectAllButton();
+                    });
                 });
+                
+                // 绑定全选按钮
+                const selectAllBtn = document.getElementById('selectAllBtn');
+                if (selectAllBtn) {
+                    selectAllBtn.addEventListener('click', () => this.toggleSelectAll());
+                }
+                
+                // 更新全选按钮状态
+                this.updateSelectAllButton();
                 
                 // 如果有当前数据源，自动加载选项
                 if (listInfo.current_id) {
@@ -464,6 +481,28 @@ export class MonthlyPage {
             document.getElementById('analysisOptions').style.display = 'none';
             this.isDataLoaded = false;
         }
+    }
+    
+    toggleSelectAll() {
+        const checkboxes = document.querySelectorAll('.ds-checkbox');
+        const allChecked = Array.from(checkboxes).every(cb => cb.checked);
+        
+        checkboxes.forEach(checkbox => {
+            checkbox.checked = !allChecked;
+        });
+        
+        this.updateDataSourceSelection();
+        this.updateSelectAllButton();
+    }
+    
+    updateSelectAllButton() {
+        const selectAllBtn = document.getElementById('selectAllBtn');
+        if (!selectAllBtn) return;
+        
+        const checkboxes = document.querySelectorAll('.ds-checkbox');
+        const allChecked = checkboxes.length > 0 && Array.from(checkboxes).every(cb => cb.checked);
+        
+        selectAllBtn.textContent = allChecked ? '取消全选' : '全选';
     }
     
     async loadOptions() {

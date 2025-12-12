@@ -300,9 +300,12 @@ async fn add_data_source(
     .map_err(|e| format!("任务执行失败: {}", e))??;
 
     // 构建客户数据映射（用于前20大客户分析）
+    // 预分配容量以提高性能
+    let estimated_customers = (result.cached_rows.len() / 10).max(100).min(10000);
     let mut customer_data_map: std::collections::HashMap<String, CustomerData> = 
-        std::collections::HashMap::new();
+        std::collections::HashMap::with_capacity(estimated_customers);
     
+    // 优化：减少克隆操作，直接使用引用
     for row in &result.cached_rows {
         customer_data_map
             .entry(row.customer_code.clone())
@@ -311,8 +314,9 @@ async fn add_data_source(
                 existing.recharge_deduction += row.recharge_deduction;
                 existing.total_amount += row.total_amount;
                 existing.order_count += 1;
+                // 只在需要时更新客户名称
                 if existing.customer_name.is_empty() && !row.customer_name.is_empty() {
-                    existing.customer_name = row.customer_name.clone();
+                    existing.customer_name.clone_from(&row.customer_name);
                 }
             })
             .or_insert_with(|| CustomerData {

@@ -164,21 +164,29 @@ where
     let col_indices = find_column_indices(header)?;
 
     // 解析所有行并缓存
+    // 预分配容量以提高性能
     let mut cached_rows: Vec<CachedRow> = Vec::with_capacity(total_rows);
-    let mut customers_map: HashMap<String, String> = HashMap::new();
-    let mut provinces_set: std::collections::HashSet<String> = std::collections::HashSet::new();
-    let mut cities_set: std::collections::HashSet<String> = std::collections::HashSet::new();
-    let mut districts_set: std::collections::HashSet<String> = std::collections::HashSet::new();
-    let mut regions_set: std::collections::HashSet<String> = std::collections::HashSet::new();
+    
+    // 预分配集合容量
+    let estimated_unique = (total_rows / 20).max(50).min(5000);
+    let mut customers_map: HashMap<String, String> = HashMap::with_capacity(estimated_unique);
+    let mut provinces_set: std::collections::HashSet<String> = std::collections::HashSet::with_capacity(estimated_unique.min(100));
+    let mut cities_set: std::collections::HashSet<String> = std::collections::HashSet::with_capacity(estimated_unique.min(500));
+    let mut districts_set: std::collections::HashSet<String> = std::collections::HashSet::with_capacity(estimated_unique.min(1000));
+    let mut regions_set: std::collections::HashSet<String> = std::collections::HashSet::with_capacity(estimated_unique.min(100));
 
     let data_rows: Vec<_> = rows.iter().skip(1).collect();
     let row_count = data_rows.len();
     
+    // 优化：批量处理，减少进度回调频率
+    let progress_interval = if row_count > 50000 { 20000 } else if row_count > 10000 { 5000 } else { 1000 };
+    
     for (i, row) in data_rows.iter().enumerate() {
         if let Some(parsed) = parse_row(row, &col_indices) {
-            // 收集选项
+            // 收集选项 - 优化：减少不必要的克隆
             if !parsed.customer_code.is_empty() {
-                customers_map.insert(parsed.customer_code.clone(), parsed.customer_name.clone());
+                customers_map.entry(parsed.customer_code.clone())
+                    .or_insert_with(|| parsed.customer_name.clone());
             }
             if let Some(ref p) = parsed.province {
                 if !p.is_empty() { provinces_set.insert(p.clone()); }
@@ -196,13 +204,14 @@ where
             cached_rows.push(parsed);
         }
         
-        if i % 10000 == 0 {
+        // 优化：根据数据量调整进度更新频率
+        if i % progress_interval == 0 || i == row_count - 1 {
             let percent = 40 + ((i as f64 / row_count as f64) * 50.0) as u32;
             progress_callback(ProcessProgress {
                 step: "2/3".to_string(),
                 message: "正在解析数据...".to_string(),
                 percent,
-                detail: format!("已处理 {} / {} 行", i, row_count),
+                detail: format!("已处理 {} / {} 行", i + 1, row_count),
             });
         }
     }
