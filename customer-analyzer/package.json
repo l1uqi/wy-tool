@@ -1,5 +1,5 @@
 {
-  "name": "customer-analyzer",
+  "name": "百宝箱",
   "version": "1.0.0",
   "description": "婉怡的工具箱 - 使用Tauri和Rust构建",
   "type": "module",

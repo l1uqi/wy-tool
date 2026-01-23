@@ -1,8 +1,10 @@
 mod excel_processor;
 mod monthly_analysis;
+mod out_of_policy;
 
 use excel_processor::{AnalysisResult, ProcessProgress, CustomerData};
 use monthly_analysis::{MonthlyAnalysisResult, CachedRow, CustomerOption};
+use out_of_policy::{OutOfPolicyResult};
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, State};
 use serde::{Deserialize, Serialize};
@@ -1365,6 +1367,18 @@ fn purchase_data_to_string(value: &calamine::Data) -> String {
     }
 }
 
+/// 加载政策外开单Excel文件
+#[tauri::command]
+async fn load_out_of_policy_excel(
+    file_path: String,
+) -> Result<OutOfPolicyResult, String> {
+    tokio::task::spawn_blocking(move || {
+        out_of_policy::load_out_of_policy_file(&file_path)
+    })
+    .await
+    .map_err(|e| format!("任务执行失败: {}", e))?
+}
+
 /// 计算客户采购额
 #[tauri::command]
 async fn calculate_customer_purchase(
@@ -1487,7 +1501,8 @@ pub fn run() {
             save_excel_file,
             get_order_details,
             load_customer_codes,
-            calculate_customer_purchase
+            calculate_customer_purchase,
+            load_out_of_policy_excel
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

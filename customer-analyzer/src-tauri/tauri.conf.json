@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "婉怡的工具箱",
+  "productName": "百宝箱",
   "version": "1.0.0",
   "identifier": "com.wytools.customer-analyzer",
   "build": {
@@ -24,7 +24,7 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "婉怡的工具箱",
+        "title": "百宝箱",
         "width": 1280,
         "height": 800,
         "resizable": true,

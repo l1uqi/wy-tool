@@ -45,6 +45,16 @@ export class HomePage {
                 </div>
                 
                 <div class="features-grid">
+                    <div class="feature-card slide-up" data-feature="guarantee">
+                        <div class="feature-icon blue">📋</div>
+                        <h3 class="feature-title">担保台账</h3>
+                        <p class="feature-desc">
+                            记录和管理担保明细信息，支持手动录入、编辑和导出，
+                            包含担保方、担保金额、回款信息等完整台账数据
+                        </p>
+                        <span class="feature-badge new">✨ 新功能</span>
+                    </div>
+                    
                     <div class="feature-card slide-up" data-feature="top20">
                         <div class="feature-icon blue">📊</div>
                         <h3 class="feature-title">前20大客户分析</h3>
@@ -81,6 +91,16 @@ export class HomePage {
                         <p class="feature-desc">
                             导入客户编码表，自动匹配数据源中的客户数据，按月份统计每个客户的采购金额，
                             支持多数据源合并分析，生成详细的月度采购报表
+                        </p>
+                        <span class="feature-badge new">✨ 新功能</span>
+                    </div>
+
+                    <div class="feature-card slide-up" data-feature="out-of-policy">
+                        <div class="feature-icon amber">📉</div>
+                        <h3 class="feature-title">政策外开单分析</h3>
+                        <p class="feature-desc">
+                            分析政策外开单数据，统计异常情况，
+                            支持按客户、产品等多维度分析
                         </p>
                         <span class="feature-badge new">✨ 新功能</span>
                     </div>
@@ -328,7 +348,9 @@ export class HomePage {
         container.querySelectorAll('.feature-card').forEach(card => {
             card.addEventListener('click', () => {
                 const feature = card.dataset.feature;
-                if (feature === 'top20') {
+                if (feature === 'guarantee') {
+                    window.location.hash = 'guarantee';
+                } else if (feature === 'top20') {
                     window.location.hash = 'top20';
                 } else if (feature === 'monthly') {
                     window.location.hash = 'monthly';
@@ -336,6 +358,8 @@ export class HomePage {
                     window.location.hash = 'rebate';
                 } else if (feature === 'purchase') {
                     window.location.hash = 'purchase';
+                } else if (feature === 'out-of-policy') {
+                    window.location.hash = 'out-of-policy';
                 } else if (feature === 'coming') {
                     this.showToast('该功能正在开发中，敬请期待！');
                 }

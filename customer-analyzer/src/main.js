@@ -1,19 +1,23 @@
 // 主入口文件 - 路由和页面管理
 import { HomePage } from './pages/home.js';
+import { GuaranteePage } from './pages/guarantee.js';
 import { Top20Page } from './pages/top20.js';
 import { MonthlyPage } from './pages/monthly.js';
 import { RebatePage } from './pages/rebate.js';
 import { PurchasePage } from './pages/purchase.js';
+import { OutOfPolicyPage } from './pages/out_of_policy.js';
 
 class App {
     constructor() {
         this.currentPage = 'home';
         this.pages = {
             home: new HomePage(this),
+            guarantee: new GuaranteePage(this),
             top20: new Top20Page(this),
             monthly: new MonthlyPage(this),
             rebate: new RebatePage(this),
-            purchase: new PurchasePage(this)
+            purchase: new PurchasePage(this),
+            'out-of-policy': new OutOfPolicyPage(this)
         };
         this.unlistenProgress = null;
         this.isImporting = false;
@@ -200,10 +204,12 @@ class App {
                 </a>
                 <div class="navbar-nav">
                     <a class="nav-link" data-page="home">首页</a>
+                    <a class="nav-link" data-page="guarantee">担保台账</a>
                     <a class="nav-link" data-page="top20">前20大客户</a>
                     <a class="nav-link" data-page="monthly">月度分析</a>
                     <a class="nav-link" data-page="rebate">返利分析</a>
                     <a class="nav-link" data-page="purchase">采购额计算</a>
+                    <a class="nav-link" data-page="out-of-policy">政策外开</a>
                 </div>
             </nav>
             <main id="page-content"></main>
