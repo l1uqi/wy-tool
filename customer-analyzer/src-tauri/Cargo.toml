@@ -27,6 +27,7 @@ regex-lite = "0.1"
 dirs = "5.0"
 uuid = { version = "1.0", features = ["v4"] }
 base64 = "0.22"
+rust_xlsxwriter = "0.79"
 
 [profile.release]
 panic = "abort"
