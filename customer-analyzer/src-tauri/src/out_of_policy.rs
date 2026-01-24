@@ -5,6 +5,7 @@ use rayon::prelude::*;
 use chrono::{Datelike, NaiveDate};
 use std::collections::HashMap;
 use rust_xlsxwriter::Workbook;
+use regex_lite::Regex;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct OutOfPolicyRow {
@@ -150,17 +151,28 @@ pub fn load_out_of_policy_file(file_path: &str) -> Result<OutOfPolicyResult, Str
     let matched_rows: Vec<OutOfPolicyRow> = analysis_rows
         .into_iter()
         .map(|mut row| {
-            // 使用新的日期解析函数，支持 Excel 日期数字和字符串格式
-            if let Some(od) = parse_date_from_analysis(&row.order_date) {
-                if let Some(policy) = find_matching_policy(&policies, &row.product_code, od, row.settlement_price) {
-                    row.policy = policy.platform_activity.clone();
-                    row.is_in_policy = "是".to_string();
-                    matched_count += 1;
+            // 只对"是否低于挂网"为"是"的行进行政策匹配
+            if row.is_below_listed != "是" {
+                // 非低于挂网行，政策相关列保持为空
+                row.policy = String::new();
+                row.is_in_policy = String::new();
+            } else {
+                // 使用新的日期解析函数，支持 Excel 日期数字和字符串格式
+                if let Some(od) = parse_date_from_analysis(&row.order_date) {
+                    if let Some(policy) = find_matching_policy(&policies, &row.product_code, od, row.settlement_price, row.sales_quantity) {
+                        row.policy = policy.platform_activity.clone();
+                        row.is_in_policy = "是".to_string();
+                        matched_count += 1;
+                    } else {
+                        // 匹配失败：清空政策列，设置为否
+                        row.policy = String::new();
+                        row.is_in_policy = "否".to_string();
+                    }
                 } else {
+                    // 日期解析失败：清空政策列，设置为否
+                    row.policy = String::new();
                     row.is_in_policy = "否".to_string();
                 }
-            } else {
-                row.is_in_policy = "否".to_string();
             }
             row
         })
@@ -269,30 +281,63 @@ fn parse_date(raw: &str) -> Option<NaiveDate> {
     NaiveDate::from_ymd_opt(parts[0].parse().ok()?, parts[1].parse().ok()?, parts[2].parse().ok()?)
 }
 
-fn find_matching_policy<'a>(policies: &'a [ActivityPolicyRow], product_code: &str, order_date: NaiveDate, settlement_price: f64) -> Option<&'a ActivityPolicyRow> {
+fn find_matching_policy<'a>(policies: &'a [ActivityPolicyRow], product_code: &str, order_date: NaiveDate, settlement_price: f64, sales_quantity: f64) -> Option<&'a ActivityPolicyRow> {
     let mut price_matched: Option<&'a ActivityPolicyRow> = None;
+    let is_gift = (settlement_price - 0.01).abs() < 0.001; // 结算单价=0.01视为赠品
 
     for p in policies {
         if p.product_code == product_code {
             if let (Some(s), Some(e)) = (parse_date(&p.start_date), parse_date(&p.end_date)) {
                 if order_date >= s && order_date <= e {
-                    // 结算单价必须大于活动后单价才算活动
-                    if settlement_price >= p.activity_price {
-                        println!("匹配成功: 商品={}, 日期={}, 结算价={}, 活动价={}, 活动={}",
-                            product_code, order_date, settlement_price, p.activity_price, p.platform_activity);
+                    // 活动后单价四舍五入保留两位小数
+                    let activity_price_rounded = (p.activity_price * 100.0).round() / 100.0;
+
+                    // 优先按价格匹配：结算单价 >= 活动后单价
+                    if settlement_price >= activity_price_rounded {
+                        println!("价格匹配成功: 商品={}, 日期={}, 结算价={}, 活动价={:.2}, 活动={}",
+                            product_code, order_date, settlement_price, activity_price_rounded, p.platform_activity);
                         price_matched = Some(p);
                         break;
-                    } else {
-                        println!("价格不匹配: 商品={}, 日期={}, 结算价={}, 活动价={}",
-                            product_code, order_date, settlement_price, p.activity_price);
+                    }
+
+                    // 价格不满足时，检查是否为买赠活动（包含"买赠"、"满"等关键字）
+                    let is_buy_x_get_y = p.platform_activity.contains("买赠") || p.platform_activity.contains("满");
+
+                    if is_buy_x_get_y && is_gift {
+                        // 赠品且有买赠活动，认为属于政策内
+                        println!("赠品买赠匹配成功: 商品={}, 日期={}, 活动={}",
+                            product_code, order_date, p.platform_activity);
+                        price_matched = Some(p);
+                        break;
                     }
                 }
             }
         }
     }
 
-    // 只返回价格匹配的（结算单价 > 活动后单价）
     price_matched
+}
+
+// 从买赠活动中提取购买数量要求
+// 例如从"买10赠1"中提取10，从"每满5盒多得1盒"中提取5
+fn extract_buy_quantity(activity: &str) -> Option<f64> {
+    // 先匹配"买X赠Y"或"买X"模式
+    let re1 = Regex::new(r"买(\d+)").unwrap();
+    if let Some(caps) = re1.captures(activity) {
+        if let Some(num_str) = caps.get(1) {
+            return num_str.as_str().parse::<f64>().ok();
+        }
+    }
+
+    // 再匹配"每满X"模式
+    let re2 = Regex::new(r"每满(\d+)").unwrap();
+    if let Some(caps) = re2.captures(activity) {
+        if let Some(num_str) = caps.get(1) {
+            return num_str.as_str().parse::<f64>().ok();
+        }
+    }
+
+    None
 }
 
 fn parse_string_cell(
