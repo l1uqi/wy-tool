@@ -154,8 +154,13 @@ pub fn load_out_of_policy_file(file_path: &str) -> Result<OutOfPolicyResult, Str
             if let Some(od) = parse_date_from_analysis(&row.order_date) {
                 if let Some(policy) = find_matching_policy(&policies, &row.product_code, od, row.settlement_price) {
                     row.policy = policy.platform_activity.clone();
+                    row.is_in_policy = "是".to_string();
                     matched_count += 1;
+                } else {
+                    row.is_in_policy = "否".to_string();
                 }
+            } else {
+                row.is_in_policy = "否".to_string();
             }
             row
         })
@@ -272,7 +277,7 @@ fn find_matching_policy<'a>(policies: &'a [ActivityPolicyRow], product_code: &st
             if let (Some(s), Some(e)) = (parse_date(&p.start_date), parse_date(&p.end_date)) {
                 if order_date >= s && order_date <= e {
                     // 结算单价必须大于活动后单价才算活动
-                    if settlement_price > p.activity_price {
+                    if settlement_price >= p.activity_price {
                         println!("匹配成功: 商品={}, 日期={}, 结算价={}, 活动价={}, 活动={}",
                             product_code, order_date, settlement_price, p.activity_price, p.platform_activity);
                         price_matched = Some(p);
