@@ -11,10 +11,19 @@ use regex_lite::Regex;
 pub struct OutOfPolicyRow {
     pub order_date: String,
     pub sales_order_no: String,
+    pub external_order_no: String,
+    pub order_type: String,
     pub customer_code: String,
     pub customer_name: String,
+    pub main_store: String,
+    pub management_org: String,
+    pub customer_nature: String,
+    pub sales_method: String,
+    pub sales_type: String,
+    pub payment_method: String,
     pub product_code: String,
     pub generic_name: String,
+    pub tax_rate: f64,
     pub sales_price: f64,
     pub settlement_price: f64,
     pub listed_price: f64,
@@ -22,9 +31,12 @@ pub struct OutOfPolicyRow {
     pub is_in_policy: String,
     pub policy: String,
     pub base_price_after_policy: f64,
+    pub remark: String,
     pub gross_margin_rate: f64,
     pub sales_quantity: f64,
     pub pay_amount: f64,
+    pub recharge_deduction: f64,
+    pub ticket_discount: f64,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -79,10 +91,19 @@ pub fn load_out_of_policy_file(file_path: &str) -> Result<OutOfPolicyResult, Str
         .map(|row| OutOfPolicyRow {
             order_date: parse_date_cell(row, &analysis_map, "下单日期"),
             sales_order_no: parse_string_cell(row, &analysis_map, "销售单号"),
+            external_order_no: parse_string_cell(row, &analysis_map, "外部单号"),
+            order_type: parse_string_cell(row, &analysis_map, "订单类型"),
             customer_code: parse_string_cell(row, &analysis_map, "客户编码"),
             customer_name: parse_string_cell(row, &analysis_map, "客户名称"),
+            main_store: parse_string_cell(row, &analysis_map, "所属主店"),
+            management_org: parse_string_cell(row, &analysis_map, "管理机构"),
+            customer_nature: parse_string_cell(row, &analysis_map, "客户性质"),
+            sales_method: parse_string_cell(row, &analysis_map, "销售方式"),
+            sales_type: parse_string_cell(row, &analysis_map, "销售类型"),
+            payment_method: parse_string_cell(row, &analysis_map, "支付方式"),
             product_code: parse_string_cell(row, &analysis_map, "商品编码"),
             generic_name: parse_string_cell(row, &analysis_map, "通用名"),
+            tax_rate: parse_float_cell(row, &analysis_map, "税率"),
             sales_price: parse_float_cell(row, &analysis_map, "销售单价/积分"),
             settlement_price: parse_float_cell(row, &analysis_map, "结算单价"),
             listed_price: parse_float_cell(row, &analysis_map, "挂网价"),
@@ -90,9 +111,12 @@ pub fn load_out_of_policy_file(file_path: &str) -> Result<OutOfPolicyResult, Str
             is_in_policy: parse_string_cell(row, &analysis_map, "是否活动政策内"),
             policy: parse_string_cell(row, &analysis_map, "活动政策"),
             base_price_after_policy: parse_float_cell(row, &analysis_map, "活动后底价"),
+            remark: parse_string_cell(row, &analysis_map, "备注"),
             gross_margin_rate: parse_float_cell(row, &analysis_map, "毛利率(%)"),
             sales_quantity: parse_float_cell(row, &analysis_map, "销售数量"),
             pay_amount: parse_float_cell(row, &analysis_map, "支付金额"),
+            recharge_deduction: parse_float_cell(row, &analysis_map, "充值抵扣"),
+            ticket_discount: parse_float_cell(row, &analysis_map, "票折金额"),
         })
         .collect();
 
@@ -162,16 +186,19 @@ pub fn load_out_of_policy_file(file_path: &str) -> Result<OutOfPolicyResult, Str
                     if let Some(policy) = find_matching_policy(&policies, &row.product_code, od, row.settlement_price, row.sales_quantity) {
                         row.policy = policy.platform_activity.clone();
                         row.is_in_policy = "是".to_string();
+                        row.base_price_after_policy = policy.activity_price;
                         matched_count += 1;
                     } else {
                         // 匹配失败：清空政策列，设置为否
                         row.policy = String::new();
                         row.is_in_policy = "否".to_string();
+                        row.base_price_after_policy = 0.0;
                     }
                 } else {
                     // 日期解析失败：清空政策列，设置为否
                     row.policy = String::new();
                     row.is_in_policy = "否".to_string();
+                    row.base_price_after_policy = 0.0;
                 }
             }
             row
@@ -192,9 +219,12 @@ pub fn load_out_of_policy_file(file_path: &str) -> Result<OutOfPolicyResult, Str
 
     // 写入表头
     let headers = [
-        "下单日期", "销售单号", "客户编码", "客户名称", "商品编码", "通用名",
+        "下单日期", "销售单号", "外部单号", "订单类型", "客户编码", "客户名称",
+        "所属主店", "管理机构", "客户性质", "销售方式", "销售类型", "支付方式",
+        "商品编码", "通用名", "税率",
         "销售单价/积分", "结算单价", "挂网价", "是否低于挂网", "是否活动政策内",
-        "活动政策", "活动后底价", "毛利率(%)", "销售数量", "支付金额",
+        "活动政策", "活动后底价", "备注", "毛利率(%)", "销售数量", "支付金额",
+        "充值抵扣", "票折金额",
     ];
     for (col, header) in headers.iter().enumerate() {
         worksheet.write_string(0, col as u16, *header)
@@ -207,33 +237,57 @@ pub fn load_out_of_policy_file(file_path: &str) -> Result<OutOfPolicyResult, Str
             .map_err(|e| format!("写入数据失败: {}", e))?;
         worksheet.write_string(row_idx as u32 + 1, 1, &row.sales_order_no)
             .map_err(|e| format!("写入数据失败: {}", e))?;
-        worksheet.write_string(row_idx as u32 + 1, 2, &row.customer_code)
+        worksheet.write_string(row_idx as u32 + 1, 2, &row.external_order_no)
             .map_err(|e| format!("写入数据失败: {}", e))?;
-        worksheet.write_string(row_idx as u32 + 1, 3, &row.customer_name)
+        worksheet.write_string(row_idx as u32 + 1, 3, &row.order_type)
             .map_err(|e| format!("写入数据失败: {}", e))?;
-        worksheet.write_string(row_idx as u32 + 1, 4, &row.product_code)
+        worksheet.write_string(row_idx as u32 + 1, 4, &row.customer_code)
             .map_err(|e| format!("写入数据失败: {}", e))?;
-        worksheet.write_string(row_idx as u32 + 1, 5, &row.generic_name)
+        worksheet.write_string(row_idx as u32 + 1, 5, &row.customer_name)
             .map_err(|e| format!("写入数据失败: {}", e))?;
-        worksheet.write_number(row_idx as u32 + 1, 6, row.sales_price)
+        worksheet.write_string(row_idx as u32 + 1, 6, &row.main_store)
             .map_err(|e| format!("写入数据失败: {}", e))?;
-        worksheet.write_number(row_idx as u32 + 1, 7, row.settlement_price)
+        worksheet.write_string(row_idx as u32 + 1, 7, &row.management_org)
             .map_err(|e| format!("写入数据失败: {}", e))?;
-        worksheet.write_number(row_idx as u32 + 1, 8, row.listed_price)
+        worksheet.write_string(row_idx as u32 + 1, 8, &row.customer_nature)
             .map_err(|e| format!("写入数据失败: {}", e))?;
-        worksheet.write_string(row_idx as u32 + 1, 9, &row.is_below_listed)
+        worksheet.write_string(row_idx as u32 + 1, 9, &row.sales_method)
             .map_err(|e| format!("写入数据失败: {}", e))?;
-        worksheet.write_string(row_idx as u32 + 1, 10, &row.is_in_policy)
+        worksheet.write_string(row_idx as u32 + 1, 10, &row.sales_type)
             .map_err(|e| format!("写入数据失败: {}", e))?;
-        worksheet.write_string(row_idx as u32 + 1, 11, &row.policy)
+        worksheet.write_string(row_idx as u32 + 1, 11, &row.payment_method)
             .map_err(|e| format!("写入数据失败: {}", e))?;
-        worksheet.write_number(row_idx as u32 + 1, 12, row.base_price_after_policy)
+        worksheet.write_string(row_idx as u32 + 1, 12, &row.product_code)
             .map_err(|e| format!("写入数据失败: {}", e))?;
-        worksheet.write_number(row_idx as u32 + 1, 13, row.gross_margin_rate)
+        worksheet.write_string(row_idx as u32 + 1, 13, &row.generic_name)
             .map_err(|e| format!("写入数据失败: {}", e))?;
-        worksheet.write_number(row_idx as u32 + 1, 14, row.sales_quantity)
+        worksheet.write_number(row_idx as u32 + 1, 14, row.tax_rate)
             .map_err(|e| format!("写入数据失败: {}", e))?;
-        worksheet.write_number(row_idx as u32 + 1, 15, row.pay_amount)
+        worksheet.write_number(row_idx as u32 + 1, 15, row.sales_price)
+            .map_err(|e| format!("写入数据失败: {}", e))?;
+        worksheet.write_number(row_idx as u32 + 1, 16, row.settlement_price)
+            .map_err(|e| format!("写入数据失败: {}", e))?;
+        worksheet.write_number(row_idx as u32 + 1, 17, row.listed_price)
+            .map_err(|e| format!("写入数据失败: {}", e))?;
+        worksheet.write_string(row_idx as u32 + 1, 18, &row.is_below_listed)
+            .map_err(|e| format!("写入数据失败: {}", e))?;
+        worksheet.write_string(row_idx as u32 + 1, 19, &row.is_in_policy)
+            .map_err(|e| format!("写入数据失败: {}", e))?;
+        worksheet.write_string(row_idx as u32 + 1, 20, &row.policy)
+            .map_err(|e| format!("写入数据失败: {}", e))?;
+        worksheet.write_number(row_idx as u32 + 1, 21, row.base_price_after_policy)
+            .map_err(|e| format!("写入数据失败: {}", e))?;
+        worksheet.write_string(row_idx as u32 + 1, 22, &row.remark)
+            .map_err(|e| format!("写入数据失败: {}", e))?;
+        worksheet.write_number(row_idx as u32 + 1, 23, row.gross_margin_rate)
+            .map_err(|e| format!("写入数据失败: {}", e))?;
+        worksheet.write_number(row_idx as u32 + 1, 24, row.sales_quantity)
+            .map_err(|e| format!("写入数据失败: {}", e))?;
+        worksheet.write_number(row_idx as u32 + 1, 25, row.pay_amount)
+            .map_err(|e| format!("写入数据失败: {}", e))?;
+        worksheet.write_number(row_idx as u32 + 1, 26, row.recharge_deduction)
+            .map_err(|e| format!("写入数据失败: {}", e))?;
+        worksheet.write_number(row_idx as u32 + 1, 27, row.ticket_discount)
             .map_err(|e| format!("写入数据失败: {}", e))?;
     }
 
@@ -300,8 +354,10 @@ fn find_matching_policy<'a>(policies: &'a [ActivityPolicyRow], product_code: &st
                         break;
                     }
 
-                    // 价格不满足时，检查是否为买赠活动（包含"买赠"、"满"等关键字）
-                    let is_buy_x_get_y = p.platform_activity.contains("买赠") || p.platform_activity.contains("满");
+                    // 价格不满足时，检查是否为买赠活动
+                    // 包含"买赠"，或者同时包含"每满"和"多得"
+                    let is_buy_x_get_y = p.platform_activity.contains("买赠")
+                        || (p.platform_activity.contains("每满") && p.platform_activity.contains("多得"));
 
                     if is_buy_x_get_y && is_gift {
                         // 赠品且有买赠活动，认为属于政策内
